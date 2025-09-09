@@ -18,6 +18,7 @@ func TestParseCommandLineArgs(t *testing.T) {
 		args        []string
 		wantConfig  string
 		wantExample bool
+		wantVersion bool
 		wantErr     bool
 	}{
 		{
@@ -25,6 +26,7 @@ func TestParseCommandLineArgs(t *testing.T) {
 			args:        []string{"prog", "-config", "test.yaml"},
 			wantConfig:  "test.yaml",
 			wantExample: false,
+			wantVersion: false,
 			wantErr:     false,
 		},
 		{
@@ -32,6 +34,15 @@ func TestParseCommandLineArgs(t *testing.T) {
 			args:        []string{"prog", "-example"},
 			wantConfig:  "",
 			wantExample: true,
+			wantVersion: false,
+			wantErr:     false,
+		},
+		{
+			name:        "Version flag",
+			args:        []string{"prog", "-version"},
+			wantConfig:  "",
+			wantExample: false,
+			wantVersion: true,
 			wantErr:     false,
 		},
 		{
@@ -39,6 +50,7 @@ func TestParseCommandLineArgs(t *testing.T) {
 			args:        []string{"prog"},
 			wantConfig:  "",
 			wantExample: false,
+			wantVersion: false,
 			wantErr:     true,
 		},
 	}
@@ -49,7 +61,12 @@ func TestParseCommandLineArgs(t *testing.T) {
 			flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 			os.Args = tt.args
 
-			gotConfig, gotExample, err := parseCommandLineArgs()
+			gotConfig, gotExample, gotVersion, err := parseCommandLineArgs()
+
+			if tt.wantVersion && tt.wantVersion != gotVersion {
+				t.Errorf("parseCommandLineArgs() version = %v, want %v", gotVersion, tt.wantVersion)
+				return
+			}
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseCommandLineArgs() error = %v, wantErr %v", err, tt.wantErr)

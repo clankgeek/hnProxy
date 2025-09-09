@@ -8,37 +8,41 @@ import (
 )
 
 // parseCommandLineArgs parses and validates command line arguments
-func parseCommandLineArgs() (configFile string, shouldCreateExample bool, err error) {
+func parseCommandLineArgs() (configFile string, shouldCreateExample bool, versionDisplay bool, err error) {
 	var config = flag.String("config", "", "Fichier de configuration YAML")
 	var example = flag.Bool("example", false, "Créer un fichier de configuration exemple")
 	var version = flag.Bool("version", false, "version du produit")
 	flag.Parse()
 
 	if *version {
-		println(VERSION)
-		os.Exit(0)
+		return "", false, true, nil
 	}
 
 	if *example {
-		return "", true, nil
+		return "", true, false, nil
 	}
 
 	if *config == "" {
-		return "", false, fmt.Errorf("fichier de configuration requis")
+		return "", false, false, fmt.Errorf("fichier de configuration requis")
 	}
 
-	return *config, false, nil
+	return *config, false, false, nil
 }
 
 func main() {
 	// Parse command line arguments
-	configFile, shouldCreateExample, err := parseCommandLineArgs()
+	configFile, shouldCreateExample, versionDisplay, err := parseCommandLineArgs()
 	if err != nil {
-		fmt.Println("hnProxy " + VERSION)
 		fmt.Println("Usage:")
 		fmt.Println("  hnProxy -config config.yaml")
 		fmt.Println("  hnProxy -example  (pour créer un fichier exemple)")
+		fmt.Println("  hnProxy -version  (affiche la version)")
 		os.Exit(1)
+	}
+
+	if versionDisplay {
+		println(VERSION)
+		return
 	}
 
 	// Handle example creation

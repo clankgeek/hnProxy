@@ -1,0 +1,11 @@
+# Build directory and artifacts
+build/
+tests/
+
+*.test
+*.out
+coverage.out
+coverage.html
+benchmark_results.txt
+
+proxy-config.yaml

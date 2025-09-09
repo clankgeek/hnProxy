@@ -24,15 +24,13 @@ et ce projet adhère au [Versioning Sémantique](https://semver.org/spec/v2.0.0.
 - Gestion sécurisée des certificats ACME
 - Headers de sécurité par défaut
 
-## [1.0.1] - 2025-09-10
+## [1.0.0] - 2025-09-09
+
+### Ajouté
 - Makefile
 - Dockerfile
 - Tests unitaires et d'intégration
 - Documentation
-
-## [1.0.0] - 2025-09-09
-
-### Ajouté
 - Version initiale de hnProxy
 - Reverse proxy HTTP/HTTPS basique
 - Configuration YAML

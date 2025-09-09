@@ -21,7 +21,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -installsuffix cgo \
-    -o reverse-proxy .
+    -o hnproxy .
 
 # Stage final avec image minimale
 FROM scratch
@@ -33,7 +33,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /etc/passwd /etc/passwd
 
 # Copier le binaire
-COPY --from=builder /app/reverse-proxy /reverse-proxy
+COPY --from=builder /app/hnproxy /hnproxy
 
 # Créer les répertoires nécessaires
 # Note: Dans scratch, nous devons créer les répertoires différemment

@@ -52,7 +52,7 @@ check_dependencies() {
     # Check if go.mod exists
     if [[ ! -f "go.mod" ]]; then
         log_warning "go.mod not found, initializing..."
-        go mod init reverse-proxy-https
+        go mod init hnproxy-https
     fi
     
     # Install dependencies
@@ -266,7 +266,7 @@ test_build() {
     
     # Test normal build
     make build
-    if [[ $? -eq 0 ]] && [[ -f "$BUILD_DIR/reverse-proxy" ]]; then
+    if [[ $? -eq 0 ]] && [[ -f "$BUILD_DIR/hnproxy" ]]; then
         log_success "Build successful"
     else
         log_error "Build failed"
@@ -294,16 +294,16 @@ test_docker_build() {
     log_info "Testing Docker build..."
     
     # Build Docker image
-    docker build -t reverse-proxy-test .
+    docker build -t hnproxy-test .
     if [[ $? -eq 0 ]]; then
         log_success "Docker build successful"
         
         # Test Docker image
         log_info "Testing Docker image..."
-        timeout 10s docker run --rm reverse-proxy-test -version || true
+        timeout 10s docker run --rm hnproxy-test -version || true
         
         # Clean up
-        docker rmi reverse-proxy-test &> /dev/null || true
+        docker rmi hnproxy-test &> /dev/null || true
     else
         log_error "Docker build failed"
         return 1

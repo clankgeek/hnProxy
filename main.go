@@ -11,7 +11,13 @@ import (
 func parseCommandLineArgs() (configFile string, shouldCreateExample bool, err error) {
 	var config = flag.String("config", "", "Fichier de configuration YAML")
 	var example = flag.Bool("example", false, "Créer un fichier de configuration exemple")
+	var version = flag.Bool("version", false, "version du produit")
 	flag.Parse()
+
+	if *version {
+		println(VERSION)
+		os.Exit(0)
+	}
 
 	if *example {
 		return "", true, nil

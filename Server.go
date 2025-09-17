@@ -15,9 +15,14 @@ type Server struct {
 
 // NewServer creates a new server instance
 func NewServer(config *ProxyConfig) *Server {
+	var firewall *Firewall
+	if config.Firewall != nil && config.Firewall.Antibot != nil && config.Firewall.Antibot.Enabled {
+		firewall = NewFirewall(config.Firewall.Antibot.BlockLegitimeBots)
+		firewall.CleanupRoutine()
+	}
 	return &Server{
 		config:  config,
-		handler: NewReverseProxyHandler(config),
+		handler: NewReverseProxyHandler(config, firewall),
 	}
 }
 
@@ -125,6 +130,32 @@ func (s *Server) startACMEHTTPServer() {
 func (s *Server) DisplayConfiguration(configFile string) {
 	fmt.Printf("🚀 hnProxy configuré\n")
 	fmt.Printf("📋 Configuration: %s\n", configFile)
+
+	firewall := false
+	if s.config.Firewall != nil {
+		withAntibot := s.config.Firewall.Antibot != nil && s.config.Firewall.Antibot.Enabled
+		withRateLimiter := s.config.Firewall.RateLimiter != nil && s.config.Firewall.RateLimiter.Enabled
+
+		if withAntibot || withRateLimiter {
+			firewall = true
+			fmt.Printf("🛡️ Firewall activé\n")
+			if withRateLimiter {
+				fmt.Printf("  • Rate Limiter activé à %d requettes par minute\n", s.config.Firewall.RateLimiter.Limit)
+			}
+			if withAntibot {
+				fmt.Printf("  • 🤖 Antibot activé ")
+				if s.config.Firewall.Antibot.BlockLegitimeBots {
+					fmt.Printf("avec bloquage des bots légitimes\n")
+				} else {
+					fmt.Printf("sans bloquage des bots légitimes\n")
+				}
+			}
+		}
+
+	}
+	if !firewall {
+		fmt.Printf("🛡️ Firewall désactivé\n")
+	}
 
 	if s.config.TLS != nil && s.config.TLS.Enabled {
 		fmt.Printf("🔒 HTTPS activé\n")

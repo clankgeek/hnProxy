@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+const VERSION = "1.1.0"
+
 // parseCommandLineArgs parses and validates command line arguments
 func parseCommandLineArgs() (configFile string, shouldCreateExample bool, versionDisplay bool, err error) {
 	var config = flag.String("config", "", "Fichier de configuration YAML")
@@ -34,7 +36,7 @@ func main() {
 	configFile, shouldCreateExample, versionDisplay, err := parseCommandLineArgs()
 	if err != nil {
 		fmt.Println("Usage:")
-		fmt.Println("  hnProxy -config config.yaml")
+		fmt.Println("  hnProxy -config hnproxy.yaml")
 		fmt.Println("  hnProxy -example  (pour créer un fichier exemple)")
 		fmt.Println("  hnProxy -version  (affiche la version)")
 		os.Exit(1)

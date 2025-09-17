@@ -23,6 +23,12 @@ et ce projet adhère au [Versioning Sémantique](https://semver.org/spec/v2.0.0.
 - Validation stricte des configurations
 - Gestion sécurisée des certificats ACME
 - Headers de sécurité par défaut
+- Antibot
+
+## [1.1.0] - 2025-09-17
+- Ajout d'un firewall avec
+  - Rate limiter
+  - Antibot
 
 ## [1.0.0] - 2025-09-09
 

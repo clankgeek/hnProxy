@@ -12,6 +12,7 @@ Un reverse proxy moderne en Go avec support HTTPS automatique via Let's Encrypt 
 - 📜 **Certificats manuels** ou automatiques
 - 🤖 **Renouvellement automatique** des certificats
 - 📦 **Build multi-plateforme**
+- 🛡️ **Firewall** avec limiteur de connexion et antibot
 
 ## 🚀 Installation rapide
 
@@ -38,6 +39,14 @@ Cela crée `proxy-config.yaml` :
 
 ```yaml
 listen: "0.0.0.0:8080"
+
+firewall:
+    ratelimiter:
+        enabled: true
+        limit: 100
+    antibot:
+        enabled: true
+        blockLegitimeBots: false
 
 tls:
   enabled: true
@@ -121,6 +130,21 @@ sudo systemctl status hnproxy
 | `make help` | Afficher l'aide complète |
 
 ## 🌐 Modes de fonctionnement
+
+### Firewall
+
+```yaml
+firewall:
+    ratelimiter:
+        enabled: true
+        limit: 100
+    antibot:
+        enabled: true
+        blockLegitimeBots: false
+```
+
+- ✅ Rate limiter en requette par minute
+- ✅ Antibot avec possibilité de laisser passer les good bots
 
 ### ACME/Let's Encrypt (Recommandé)
 

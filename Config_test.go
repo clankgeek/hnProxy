@@ -27,7 +27,7 @@ func TestHandleExampleCreation(t *testing.T) {
 	}
 
 	// Check if file was created
-	if _, err := os.Stat("proxy-config.yaml"); os.IsNotExist(err) {
+	if _, err := os.Stat("hnproxy.yaml"); os.IsNotExist(err) {
 		t.Error("Example config file was not created")
 	}
 }

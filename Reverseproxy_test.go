@@ -35,7 +35,8 @@ func TestReverseProxyHandler_ServeHTTP(t *testing.T) {
 	}
 
 	// Create handler
-	handler := NewReverseProxyHandler(config)
+	firewall := NewFirewall(false)
+	handler := NewReverseProxyHandler(config, firewall)
 
 	tests := []struct {
 		name       string
@@ -109,7 +110,7 @@ func TestReverseProxyHandler_LoadBalancing(t *testing.T) {
 		},
 	}
 
-	handler := NewReverseProxyHandler(config)
+	handler := NewReverseProxyHandler(config, nil)
 
 	// Make multiple requests and count responses
 	responses := make(map[string]int)
@@ -159,7 +160,7 @@ func TestReverseProxyHandler_ErrorCases(t *testing.T) {
 		},
 	}
 
-	handler := NewReverseProxyHandler(config)
+	handler := NewReverseProxyHandler(config, nil)
 
 	tests := []struct {
 		name           string
@@ -236,7 +237,7 @@ func BenchmarkReverseProxyHandler_ServeHTTP(b *testing.B) {
 		},
 	}
 
-	handler := NewReverseProxyHandler(config)
+	handler := NewReverseProxyHandler(config, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -12,9 +12,25 @@ import (
 
 // Configuration YAML
 type Config struct {
-	Listen string           `yaml:"listen"`
-	TLS    *TLSConfig       `yaml:"tls,omitempty"`
-	Routes map[string]Route `yaml:"routes"`
+	Listen   string `yaml:"listen"`
+	Firewall *FirewallConfig
+	TLS      *TLSConfig       `yaml:"tls,omitempty"`
+	Routes   map[string]Route `yaml:"routes"`
+}
+
+type FirewallConfig struct {
+	RateLimiter *RateLimiterConfig
+	Antibot     *AntiBotsConfig
+}
+
+type RateLimiterConfig struct {
+	Enabled bool `yaml:"enabled"`
+	Limit   int  `yaml:"limit"`
+}
+
+type AntiBotsConfig struct {
+	Enabled           bool `yaml:"enabled"`
+	BlockLegitimeBots bool `yaml:"blockLegitimeBots"`
 }
 
 type TLSConfig struct {
@@ -39,13 +55,14 @@ type Route struct {
 // Configuration interne du reverse proxy
 type ProxyConfig struct {
 	ListenAddr string
+	Firewall   *FirewallConfig
 	TLS        *TLSConfig
 	Routes     map[string]*BackendTarget
 }
 
 // handleExampleCreation creates an example configuration file
 func handleExampleCreation() error {
-	filename := "proxy-config.yaml"
+	filename := "hnproxy.yaml"
 	if err := createExampleConfig(filename); err != nil {
 		return fmt.Errorf("erreur création exemple: %v", err)
 	}
@@ -93,6 +110,16 @@ func setupACME(tlsConfig *TLSConfig) (*autocert.Manager, error) {
 func createExampleConfig(filename string) error {
 	example := Config{
 		Listen: "0.0.0.0:8080",
+		Firewall: &FirewallConfig{
+			RateLimiter: &RateLimiterConfig{
+				Enabled: false,
+				Limit:   100,
+			},
+			Antibot: &AntiBotsConfig{
+				Enabled:           false,
+				BlockLegitimeBots: false,
+			},
+		},
 		TLS: &TLSConfig{
 			Enabled: true,
 			ACME: &ACME{
@@ -186,6 +213,7 @@ func ValidateConfig(config *ProxyConfig) error {
 func convertConfig(yamlConfig *Config) (*ProxyConfig, error) {
 	proxyConfig := &ProxyConfig{
 		ListenAddr: yamlConfig.Listen,
+		Firewall:   yamlConfig.Firewall,
 		TLS:        yamlConfig.TLS,
 		Routes:     make(map[string]*BackendTarget),
 	}

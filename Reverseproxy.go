@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -9,16 +10,52 @@ import (
 
 // Reverse Proxy Handler
 type ReverseProxyHandler struct {
-	config *ProxyConfig
+	config   *ProxyConfig
+	firewall *Firewall
 }
 
-func NewReverseProxyHandler(config *ProxyConfig) *ReverseProxyHandler {
-	return &ReverseProxyHandler{config: config}
+func NewReverseProxyHandler(config *ProxyConfig, firewall *Firewall) *ReverseProxyHandler {
+	return &ReverseProxyHandler{
+		config:   config,
+		firewall: firewall,
+	}
+}
+
+func (rph *ReverseProxyHandler) Firewall(r *http.Request) error {
+	if rph.config.Firewall != nil && rph.firewall != nil {
+		withLimiter := rph.config.Firewall.RateLimiter != nil && rph.config.Firewall.RateLimiter.Enabled
+		withAntiBot := rph.config.Firewall.Antibot != nil && rph.config.Firewall.Antibot.Enabled
+
+		if withLimiter || withAntiBot {
+			clientIp := rph.firewall.GetClientIP(r)
+			if rph.firewall.isIPBlocked(clientIp) {
+				return fmt.Errorf("")
+			}
+			if withLimiter && rph.firewall.IsLimiter(r, clientIp) {
+				return fmt.Errorf("🚫 Requette rejetée par le firewall, module ratelimiter")
+			}
+			if withAntiBot && rph.firewall.IsBot(r, clientIp) {
+				return fmt.Errorf("🚫 Requette rejetée par le firewall, module antibot")
+			}
+		}
+
+	}
+	return nil
 }
 
 func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Extraire le hostname (sans le port)
 	hostname := strings.Split(r.Host, ":")[0]
+
+	err := rph.Firewall(r)
+	if err != nil {
+		http.Error(w, "Access Denied", http.StatusForbidden)
+		msg := err.Error()
+		if msg != "" {
+			log.Print(msg)
+		}
+		return
+	}
 
 	// Chercher la route correspondante
 	target, exists := rph.config.Routes[hostname]

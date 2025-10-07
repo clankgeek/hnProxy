@@ -16,8 +16,8 @@ type Server struct {
 // NewServer creates a new server instance
 func NewServer(config *ProxyConfig) *Server {
 	var firewall *Firewall
-	if config.Firewall != nil && config.Firewall.Antibot != nil && config.Firewall.Antibot.Enabled {
-		firewall = NewFirewall(config.Firewall.Antibot.BlockLegitimeBots)
+	if config.Firewall != nil && config.Firewall.Enabled {
+		firewall = NewFirewall(config.Firewall)
 		firewall.CleanupRoutine()
 	}
 	return &Server{

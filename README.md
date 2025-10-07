@@ -41,12 +41,17 @@ Cela crée `proxy-config.yaml` :
 listen: "0.0.0.0:8080"
 
 firewall:
+    enabled: true
     ratelimiter:
         enabled: true
         limit: 100
     antibot:
         enabled: true
         blockLegitimeBots: false
+    patternsfiltering:
+        enabled: false
+    suspiciousbehavior:
+        enabled: false
 
 tls:
   enabled: true

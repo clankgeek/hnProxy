@@ -21,15 +21,15 @@ func TestNewFirewall(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fw := NewFirewall(tt.blockLegitimeBots)
+			fw := NewFirewall(NewFirewallConfig(true, 100, true, tt.blockLegitimeBots, false, false))
 
 			if fw == nil {
 				t.Fatal("NewFirewall a retourné nil")
 			}
 
-			if fw.blockLegitimeBots != tt.blockLegitimeBots {
+			if fw.config.Antibot.BlockLegitimeBots != tt.blockLegitimeBots {
 				t.Errorf("blockLegitimeBots = %v, attendu %v",
-					fw.blockLegitimeBots, tt.blockLegitimeBots)
+					fw.config.Antibot.BlockLegitimeBots, tt.blockLegitimeBots)
 			}
 
 			if fw.blockedIPs == nil {
@@ -49,7 +49,7 @@ func TestNewFirewall(t *testing.T) {
 
 // TestIsBot_UserAgentVide teste la détection d'un User-Agent vide
 func TestIsBot_UserAgentVide(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, true, false, true, true))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("User-Agent", "")
 
@@ -64,7 +64,7 @@ func TestIsBot_UserAgentVide(t *testing.T) {
 
 // TestIsBot_BotsMalveillants teste la détection des bots malveillants
 func TestIsBot_BotsMalveillants(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, true, false, true, true))
 
 	botUserAgents := []string{
 		"python-requests/2.28.0",
@@ -129,7 +129,7 @@ func TestIsBot_BotsLegitimes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fw := NewFirewall(tt.blockLegitimeBots)
+			fw := NewFirewall(NewFirewallConfig(true, 100, true, tt.blockLegitimeBots, true, true))
 			req := httptest.NewRequest("GET", "/", nil)
 			req.Header.Set("User-Agent", tt.userAgent)
 			req.Header.Set("Accept", "text/html")
@@ -145,7 +145,7 @@ func TestIsBot_BotsLegitimes(t *testing.T) {
 
 // TestHasSuspiciousBehavior teste la détection de comportements suspects
 func TestHasSuspiciousBehavior(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(true, 100, false, false, false, true))
 
 	tests := []struct {
 		name       string
@@ -191,9 +191,9 @@ func TestHasSuspiciousBehavior(t *testing.T) {
 			req := httptest.NewRequest("GET", "/", nil)
 			tt.setupReq(req)
 
-			result := fw.hasSupiciousBehavior(req)
+			result := fw.hasSuspiciousBehavior(req)
 			if result != tt.suspicious {
-				t.Errorf("hasSupiciousBehavior() = %v, attendu %v", result, tt.suspicious)
+				t.Errorf("hasSuspiciousBehavior() = %v, attendu %v", result, tt.suspicious)
 			}
 		})
 	}
@@ -201,7 +201,7 @@ func TestHasSuspiciousBehavior(t *testing.T) {
 
 // TestHasSuspiciousBehavior_PathsSensibles teste la détection d'accès à des fichiers sensibles
 func TestHasSuspiciousBehavior_PathsSensibles(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(true, 100, true, false, true, true))
 
 	suspiciousPaths := []string{
 		"/.env",
@@ -217,7 +217,7 @@ func TestHasSuspiciousBehavior_PathsSensibles(t *testing.T) {
 			req.Header.Set("Accept", "text/html")
 			req.Header.Set("Accept-Language", "en")
 
-			if !fw.hasSupiciousBehavior(req) {
+			if !fw.hasSuspiciousBehavior(req) {
 				t.Errorf("Le chemin %s devrait être détecté comme suspect", path)
 			}
 		})
@@ -228,7 +228,7 @@ func TestHasSuspiciousBehavior_PathsSensibles(t *testing.T) {
 	req.Header.Set("Accept", "text/html")
 	req.Header.Set("Accept-Language", "en")
 
-	if fw.hasSupiciousBehavior(req) {
+	if fw.hasSuspiciousBehavior(req) {
 		t.Error("Un chemin normal ne devrait pas être suspect")
 	}
 }
@@ -307,7 +307,7 @@ func TestRateLimiter_Concurrent(t *testing.T) {
 
 // TestIsLimiter teste la méthode IsLimiter
 func TestIsLimiter(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(true, 100, false, false, false, false))
 	fw.rateLimiter.limit = 2
 	fw.rateLimiter.window = 100 * time.Millisecond
 
@@ -334,7 +334,7 @@ func TestIsLimiter(t *testing.T) {
 
 // TestBlockIP_Duration teste le blocage temporaire des IPs
 func TestBlockIP_Duration(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(true, 100, false, false, false, false))
 	ip := "192.168.1.1"
 
 	// Bloquer l'IP pour 50ms
@@ -354,7 +354,7 @@ func TestBlockIP_Duration(t *testing.T) {
 
 // TestGetClientIP teste l'extraction de l'IP cliente
 func TestGetClientIP(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, true, true))
 
 	tests := []struct {
 		name       string
@@ -416,7 +416,7 @@ func TestGetClientIP(t *testing.T) {
 
 // TestCleanupRoutine teste le nettoyage périodique
 func TestCleanupRoutine(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, true, true))
 
 	// Bloquer quelques IPs avec des durées courtes
 	fw.blockIP("192.168.1.1", 50*time.Millisecond)
@@ -461,7 +461,7 @@ func TestCleanupRoutine(t *testing.T) {
 
 // TestIsLegitimateBot teste la détection des bots légitimes
 func TestIsLegitimateBot(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, true, false, true, true))
 
 	tests := []struct {
 		userAgent    string
@@ -489,7 +489,7 @@ func TestIsLegitimateBot(t *testing.T) {
 
 // TestPatternsSuspects teste la détection basée sur les patterns
 func TestPatternsSuspects(t *testing.T) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, true, false, true, true))
 
 	tests := []struct {
 		name        string
@@ -541,7 +541,7 @@ func TestPatternsSuspects(t *testing.T) {
 
 // BenchmarkIsBot teste les performances de IsBot
 func BenchmarkIsBot(b *testing.B) {
-	fw := NewFirewall(false)
+	fw := NewFirewall(NewFirewallConfig(false, 100, true, false, true, true))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "text/html")

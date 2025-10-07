@@ -25,6 +25,9 @@ et ce projet adhère au [Versioning Sémantique](https://semver.org/spec/v2.0.0.
 - Headers de sécurité par défaut
 - Antibot
 
+## [1.2.0] - 2025-10-07
+- Configuration plus fine du firewall dans le fichier yaml
+
 ## [1.1.0] - 2025-09-17
 - Ajout d'un firewall avec
   - Rate limiter

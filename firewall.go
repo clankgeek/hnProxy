@@ -10,6 +10,8 @@ import (
 
 // Firewall gère la détection et le blocage des bots
 type Firewall struct {
+	config *FirewallConfig
+
 	// Liste des User-Agents de bots connus
 	botUserAgents []string
 
@@ -19,9 +21,6 @@ type Firewall struct {
 
 	// Patterns suspects dans les User-Agents
 	suspiciousPatterns []string
-
-	// Option pour bloquer aussi les bots légitimes (Google, Bing, etc.)
-	blockLegitimeBots bool
 
 	// Liste des bots légitimes
 	legitimateBots []string
@@ -37,12 +36,30 @@ type RateLimiter struct {
 	window   time.Duration // Fenêtre de temps
 }
 
-// NewFirewall crée une nouvelle instance de Firewall
-func NewFirewall(blockLegitimeBots bool) *Firewall {
-	return &Firewall{
-		// CONFIGURATION: Mettez à true pour bloquer TOUS les bots (y compris Google, Bing, etc.)
-		blockLegitimeBots: blockLegitimeBots, // false = autoriser les bots légitimes, true = tout bloquer
+func NewFirewallConfig(withRateLimiter bool, limit int, withAntibot bool, withBlockLegitimeBots bool, withPatternsFiltering bool, withSuspiciousBehavior bool) *FirewallConfig {
+	return &FirewallConfig{
+		Enabled: true,
+		RateLimiter: &RateLimiterConfig{
+			Enabled: withRateLimiter,
+			Limit:   100,
+		},
+		Antibot: &AntiBotsConfig{
+			Enabled:           withAntibot,
+			BlockLegitimeBots: withBlockLegitimeBots,
+		},
+		PatternsFiltering: &PatternsFilteringConfig{
+			Enabled: withPatternsFiltering,
+		},
+		SuspiciousBehavior: &SuspiciousBehaviorConfig{
+			Enabled: withSuspiciousBehavior,
+		},
+	}
+}
 
+// NewFirewall crée une nouvelle instance de Firewall
+func NewFirewall(config *FirewallConfig) *Firewall {
+	return &Firewall{
+		config: config,
 		botUserAgents: []string{
 			// Bots de scraping courants
 			"python-requests",
@@ -63,6 +80,7 @@ func NewFirewall(blockLegitimeBots bool) *Firewall {
 			"sqlmap",
 			"havij",
 			"acunetix",
+			"Sogou",
 
 			// Bots commerciaux
 			"ahrefsbot",
@@ -134,7 +152,7 @@ func NewFirewall(blockLegitimeBots bool) *Firewall {
 	}
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
-	if !bd.rateLimiter.Allow(clientIP) {
+	if bd.config.RateLimiter != nil && bd.config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
 		log.Printf("🛡️	Rate limit dépassé pour %s", clientIP)
 		bd.blockIP(clientIP, 15*time.Minute)
 		return true
@@ -147,52 +165,58 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	userAgent := strings.ToLower(r.Header.Get("User-Agent"))
 	log.Printf("User Agent est : %s", userAgent)
 
-	// Vérifier le User-Agent vide (suspect)
-	if userAgent == "" {
-		log.Printf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP)
-		bd.blockIP(clientIP, 1*time.Hour)
-		return true
+	// Vérifier les bots légitimes SI on veut les bloquer
+	if bd.config.Antibot != nil {
+		if bd.config.Antibot.Enabled && bd.config.Antibot.BlockLegitimeBots {
+			for _, bot := range bd.legitimateBots {
+				if strings.Contains(userAgent, bot) {
+					log.Printf("🛡️🤖	Bot légitime bloqué: %s depuis %s", bot, clientIP)
+					// Blocage plus court pour les bots légitimes (ils reviendront)
+					bd.blockIP(clientIP, 30*time.Minute)
+					return true
+				}
+			}
+		}
+
+		// Vérifier les User-Agents de bots connus (malveillants)
+		if bd.config.Antibot.Enabled {
+			// Vérifier le User-Agent vide (suspect)
+			if userAgent == "" {
+				log.Printf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP)
+				bd.blockIP(clientIP, 1*time.Hour)
+				return true
+			}
+
+			for _, botUA := range bd.botUserAgents {
+				if strings.Contains(userAgent, botUA) {
+					log.Printf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP)
+					bd.blockIP(clientIP, 24*time.Hour)
+					return true
+				}
+			}
+		}
 	}
 
-	// Vérifier les bots légitimes SI on veut les bloquer
-	if bd.blockLegitimeBots {
-		for _, bot := range bd.legitimateBots {
-			if strings.Contains(userAgent, bot) {
-				log.Printf("🛡️🤖	Bot légitime bloqué: %s depuis %s", bot, clientIP)
-				// Blocage plus court pour les bots légitimes (ils reviendront)
-				bd.blockIP(clientIP, 30*time.Minute)
+	// Vérifier les patterns suspects
+	if bd.config.PatternsFiltering != nil && bd.config.PatternsFiltering.Enabled {
+		for _, pattern := range bd.suspiciousPatterns {
+			if strings.Contains(userAgent, pattern) {
+				// Si on ne bloque PAS les bots légitimes, vérifier si c'en est un
+				if !bd.config.Antibot.BlockLegitimeBots && bd.isLegitimateBot(userAgent) {
+					// C'est un bot légitime et on ne les bloque pas
+					log.Printf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP)
+					continue
+				}
+				// Sinon, c'est suspect et on bloque
+				log.Printf("🛡️	Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP)
+				bd.blockIP(clientIP, 6*time.Hour)
 				return true
 			}
 		}
 	}
 
-	// Vérifier les User-Agents de bots connus (malveillants)
-	for _, botUA := range bd.botUserAgents {
-		if strings.Contains(userAgent, botUA) {
-			log.Printf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP)
-			bd.blockIP(clientIP, 24*time.Hour)
-			return true
-		}
-	}
-
-	// Vérifier les patterns suspects
-	for _, pattern := range bd.suspiciousPatterns {
-		if strings.Contains(userAgent, pattern) {
-			// Si on ne bloque PAS les bots légitimes, vérifier si c'en est un
-			if !bd.blockLegitimeBots && bd.isLegitimateBot(userAgent) {
-				// C'est un bot légitime et on ne les bloque pas
-				log.Printf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP)
-				continue
-			}
-			// Sinon, c'est suspect et on bloque
-			log.Printf("🛡️	Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP)
-			bd.blockIP(clientIP, 6*time.Hour)
-			return true
-		}
-	}
-
 	// Vérifications additionnelles
-	if bd.hasSupiciousBehavior(r) {
+	if bd.config.SuspiciousBehavior != nil && bd.config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
 		log.Printf("🛡️🤖	Comportement suspect détecté depuis %s", clientIP)
 		bd.blockIP(clientIP, 30*time.Minute)
 		return true
@@ -201,8 +225,8 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	return false
 }
 
-// hasSupiciousBehavior vérifie des comportements suspects
-func (bd *Firewall) hasSupiciousBehavior(r *http.Request) bool {
+// hasSuspiciousBehavior vérifie des comportements suspects
+func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 	// Vérifier l'absence de headers standards de navigateurs
 	accept := r.Header.Get("Accept")
 	acceptLanguage := r.Header.Get("Accept-Language")

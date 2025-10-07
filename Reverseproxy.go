@@ -22,21 +22,16 @@ func NewReverseProxyHandler(config *ProxyConfig, firewall *Firewall) *ReversePro
 }
 
 func (rph *ReverseProxyHandler) Firewall(r *http.Request) error {
-	if rph.config.Firewall != nil && rph.firewall != nil {
-		withLimiter := rph.config.Firewall.RateLimiter != nil && rph.config.Firewall.RateLimiter.Enabled
-		withAntiBot := rph.config.Firewall.Antibot != nil && rph.config.Firewall.Antibot.Enabled
-
-		if withLimiter || withAntiBot {
-			clientIp := rph.firewall.GetClientIP(r)
-			if rph.firewall.isIPBlocked(clientIp) {
-				return fmt.Errorf("")
-			}
-			if withLimiter && rph.firewall.IsLimiter(r, clientIp) {
-				return fmt.Errorf("🚫 Requette rejetée par le firewall, module ratelimiter")
-			}
-			if withAntiBot && rph.firewall.IsBot(r, clientIp) {
-				return fmt.Errorf("🚫 Requette rejetée par le firewall, module antibot")
-			}
+	if rph.config.Firewall != nil && rph.config.Firewall.Enabled && rph.firewall != nil {
+		clientIp := rph.firewall.GetClientIP(r)
+		if rph.firewall.isIPBlocked(clientIp) {
+			return fmt.Errorf("")
+		}
+		if rph.firewall.IsLimiter(r, clientIp) {
+			return fmt.Errorf("🚫 Requette rejetée par le firewall, module ratelimiter")
+		}
+		if rph.firewall.IsBot(r, clientIp) {
+			return fmt.Errorf("🚫 Requette rejetée par le firewall, module antibot")
 		}
 
 	}

@@ -12,15 +12,26 @@ import (
 
 // Configuration YAML
 type Config struct {
-	Listen   string `yaml:"listen"`
-	Firewall *FirewallConfig
+	Listen   string           `yaml:"listen"`
+	Firewall *FirewallConfig  `yaml:"firewall"`
 	TLS      *TLSConfig       `yaml:"tls,omitempty"`
 	Routes   map[string]Route `yaml:"routes"`
 }
 
 type FirewallConfig struct {
-	RateLimiter *RateLimiterConfig
-	Antibot     *AntiBotsConfig
+	Enabled            bool                      `yaml:"enabled"`
+	RateLimiter        *RateLimiterConfig        `yaml:"ratelimiter"`
+	Antibot            *AntiBotsConfig           `yaml:"antibot"`
+	PatternsFiltering  *PatternsFilteringConfig  `yaml:"patternsfiltering"`
+	SuspiciousBehavior *SuspiciousBehaviorConfig `yaml:"suspiciousbehavior"`
+}
+
+type PatternsFilteringConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+type SuspiciousBehaviorConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type RateLimiterConfig struct {
@@ -111,13 +122,17 @@ func createExampleConfig(filename string) error {
 	example := Config{
 		Listen: "0.0.0.0:8080",
 		Firewall: &FirewallConfig{
+			Enabled: true,
 			RateLimiter: &RateLimiterConfig{
 				Enabled: false,
 				Limit:   100,
 			},
 			Antibot: &AntiBotsConfig{
-				Enabled:           false,
+				Enabled:           true,
 				BlockLegitimeBots: false,
+			},
+			PatternsFiltering: &PatternsFilteringConfig{
+				Enabled: false,
 			},
 		},
 		TLS: &TLSConfig{

@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-const VERSION = "1.1.0"
+const VERSION string = "1.2.0"
 
 // parseCommandLineArgs parses and validates command line arguments
 func parseCommandLineArgs() (configFile string, shouldCreateExample bool, versionDisplay bool, err error) {

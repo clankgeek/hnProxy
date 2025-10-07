@@ -2,19 +2,19 @@
 
 Un reverse proxy moderne en Go avec support HTTPS automatique via Let's Encrypt (ACME) et configuration par fichier YAML.
 
-## ✨ Fonctionnalités
+## Fonctionnalités
 
-- 🔀 **Reverse proxy** avec routage par hostname
-- 🔒 **HTTPS automatique** via Let's Encrypt (ACME)
-- ⚖️ **Load balancing** round-robin
-- 📝 **Configuration YAML** flexible
-- 🔄 **Redirection HTTP→HTTPS** optionnelle
-- 📜 **Certificats manuels** ou automatiques
-- 🤖 **Renouvellement automatique** des certificats
-- 📦 **Build multi-plateforme**
-- 🛡️ **Firewall** avec limiteur de connexion et antibot
+-  **Reverse proxy** avec routage par hostname
+-  **HTTPS automatique** via Let's Encrypt (ACME)
+-  **Load balancing** round-robin
+-  **Configuration YAML** flexible
+-  **Redirection HTTP→HTTPS** optionnelle
+-  **Certificats manuels** ou automatiques
+-  **Renouvellement automatique** des certificats
+-  **Build multi-plateforme**
+-  **Firewall** avec limiteur de connexion et antibot
 
-## 🚀 Installation rapide
+## Installation rapide
 
 ```bash
 # Setup complet pour nouveaux utilisateurs
@@ -27,7 +27,7 @@ make example       # Créer la config exemple
 make run           # Lancer le proxy
 ```
 
-## 📋 Configuration
+## Configuration
 
 ### Créer la configuration
 
@@ -35,18 +35,23 @@ make run           # Lancer le proxy
 make example
 ```
 
-Cela crée `proxy-config.yaml` :
+Cela crée `hnproxy.yaml` :
 
 ```yaml
 listen: "0.0.0.0:8080"
 
 firewall:
+    enabled: true
     ratelimiter:
         enabled: true
         limit: 100
     antibot:
         enabled: true
         blockLegitimeBots: false
+    patternsfiltering:
+        enabled: false
+    suspiciousbehavior:
+        enabled: false
 
 tls:
   enabled: true
@@ -77,7 +82,7 @@ routes:
 3. **Configurer vos backends**
 4. **Supprimer `directory_url`** pour la production
 
-## 🏃 Utilisation
+## Utilisation
 
 ### Développement
 
@@ -112,7 +117,7 @@ sudo systemctl start hnproxy
 sudo systemctl status hnproxy
 ```
 
-## 🔧 Commandes Make disponibles
+## Commandes Make disponibles
 
 | Commande | Description |
 |----------|-------------|
@@ -129,22 +134,27 @@ sudo systemctl status hnproxy
 | `make clean` | Nettoyer les artifacts |
 | `make help` | Afficher l'aide complète |
 
-## 🌐 Modes de fonctionnement
+## Modes de fonctionnement
 
 ### Firewall
 
 ```yaml
 firewall:
+    enabled: true
     ratelimiter:
         enabled: true
         limit: 100
     antibot:
         enabled: true
         blockLegitimeBots: false
+    patternsfiltering:
+        enabled: false
+    suspiciousbehavior:
+        enabled: false
 ```
 
-- ✅ Rate limiter en requette par minute
-- ✅ Antibot avec possibilité de laisser passer les good bots
+- Rate limiter en requette par minute
+- Antibot avec possibilité de laisser passer les good bots
 
 ### ACME/Let's Encrypt (Recommandé)
 
@@ -158,10 +168,10 @@ tls:
     cache_dir: "./certs"
 ```
 
-- ✅ Certificats automatiques
-- ✅ Renouvellement automatique
-- ✅ Challenge HTTP-01
-- ✅ Ports 80 + 443
+- Certificats automatiques
+- Renouvellement automatique
+- Challenge HTTP-01
+- Ports 80 + 443
 
 ### Certificats manuels
 
@@ -188,7 +198,7 @@ listen: "0.0.0.0:8080"
 make check
 ```
 
-- Go 1.19+
+- Go 1.25+
 - Ports 80 et 443 libres (pour HTTPS)
 - Privilèges root (pour ports < 1024)
 - DNS configuré (domaines → votre IP)
@@ -221,7 +231,7 @@ acme:
   directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
 ```
 
-## 🏗️ Build multi-plateforme
+## Build multi-plateforme
 
 ```bash
 # Build toutes les plateformes
@@ -236,7 +246,7 @@ Plateformes supportées :
 - macOS (amd64, arm64) 
 - Windows (amd64)
 
-## 📊 Monitoring
+## Monitoring
 
 ### Logs
 
@@ -245,7 +255,7 @@ Plateformes supportées :
 sudo journalctl -u hnproxy -f
 
 # Direct
-sudo ./hnproxy -config config.yaml
+sudo ./hnproxy -config hnproxy.yaml
 ```
 
 ### Status
@@ -258,7 +268,7 @@ sudo systemctl status hnproxy
 ls -la ./certs/
 ```
 
-## ❓ Dépannage
+## Dépannage
 
 ### Port déjà utilisé
 
@@ -283,11 +293,11 @@ nslookup app1.example.com
 dig app1.example.com
 ```
 
-## 📄 Licence
+## Licence
 
 MIT License - Voir le fichier LICENSE pour plus de détails.
 
-## 🤝 Contribution
+## Contribution
 
 Les contributions sont les bienvenues ! Ouvrez une issue ou une pull request.
 

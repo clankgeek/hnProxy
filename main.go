@@ -561,7 +561,6 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		Director: func(req *http.Request) {
 			req.URL.Scheme = backendURL.Scheme
 			req.URL.Host = backendURL.Host
-			req.Host = backendURL.Host
 
 			// Ajouter des headers utiles
 			if req.Header.Get("X-Forwarded-Proto") == "" {

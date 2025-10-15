@@ -4,17 +4,22 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"log"
+	"io"
+	"log/syslog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,10 +59,12 @@ func (bt *BackendTarget) NextURL() *url.URL {
 
 // Configuration YAML
 type Config struct {
-	Listen   string           `yaml:"listen"`
-	Firewall *FirewallConfig  `yaml:"firewall"`
-	TLS      *TLSConfig       `yaml:"tls,omitempty"`
-	Routes   map[string]Route `yaml:"routes"`
+	Listen     string           `yaml:"listen"`
+	Firewall   *FirewallConfig  `yaml:"firewall"`
+	TLS        *TLSConfig       `yaml:"tls,omitempty"`
+	Routes     map[string]Route `yaml:"routes"`
+	Logger     LoggerConfig     `yaml:"logger"`
+	Production bool             `yaml:"production"`
 }
 
 type FirewallConfig struct {
@@ -111,6 +118,258 @@ type ProxyConfig struct {
 	Firewall   *FirewallConfig
 	TLS        *TLSConfig
 	Routes     map[string]*BackendTarget
+	Logger     LoggerConfig
+	Production bool
+}
+
+type LoggerConfig struct {
+	Level  string             `yaml:"level"`
+	File   loggerFileConfig   `yaml:"file"`
+	Syslog loggerSyslogConfig `yaml:"syslog"`
+}
+
+type loggerFileConfig struct {
+	Enable     bool   `yaml:"enable"`
+	Path       string `yaml:"path"`
+	MaxSize    int    `yaml:"maxsize"`
+	MaxBackups int    `yaml:"maxbackups"`
+	MaxAge     int    `yaml:"maxage"`
+	Compress   bool   `yaml:"compress"`
+}
+
+type loggerSyslogConfig struct {
+	Enable   bool            `yaml:"enable"`
+	Protocol string          `yaml:"protocol"`
+	Address  string          `yaml:"address"`
+	Tag      string          `yaml:"tag"`
+	Priority syslog.Priority `yaml:"priority"`
+}
+
+// SyslogLevelWriter adapte syslog.Writer pour gérer les niveaux zerolog
+type SyslogLevelWriter struct {
+	writer *syslog.Writer
+}
+
+// InitLogger configure le logger global Zerolog
+// Setup initialise le logger avec la configuration
+func initLogger(cfg LoggerConfig, production bool) {
+	// Définir le niveau de log
+	level := parseLevel(cfg.Level)
+	zerolog.SetGlobalLevel(level)
+
+	// Configurer le format de temps
+	zerolog.TimeFieldFormat = time.RFC3339
+
+	var writers []io.Writer
+
+	// Writer pour la console
+	if !production {
+		consoleWriter := zerolog.ConsoleWriter{
+			Out:        os.Stdout,
+			TimeFormat: "15:04:05",
+			NoColor:    false,
+		}
+		writers = append(writers, consoleWriter)
+	} else {
+		writers = append(writers, os.Stdout)
+	}
+
+	// Writer pour le fichier si activé
+	if cfg.File.Enable {
+		fileWriter, err := setupFileWriter(cfg.File)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to setup file writer")
+		}
+		writers = append(writers, fileWriter)
+	}
+
+	// Wrtier syslog si activé
+	if cfg.Syslog.Enable {
+		syslogWriter, err := setupSyslogWriter(cfg.Syslog)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to setup syslog writer")
+		}
+		writers = append(writers, syslogWriter)
+	}
+
+	// Créer un multi-writer
+	multi := io.MultiWriter(writers...)
+
+	// Configurer le logger global
+	log.Logger = zerolog.New(multi).
+		With().
+		Timestamp().
+		Caller().
+		Logger()
+
+	environnment := "developpement"
+	if production {
+		environnment = "production"
+	}
+	log.Info().
+		Str("environment", environnment).
+		Str("level", cfg.Level).
+		Bool("log_to_file", cfg.File.Enable).
+		Bool("log_to_syslog", cfg.Syslog.Enable).
+		Msg("Logger initialized")
+}
+
+// setupFileWriter configure le writer pour les fichiers
+func setupFileWriter(cfg loggerFileConfig) (io.Writer, error) {
+	// Créer le dossier si nécessaire
+	dir := filepath.Dir(cfg.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+
+	fileWriter := &lumberjack.Logger{
+		Filename:   cfg.Path,
+		MaxSize:    cfg.MaxSize,
+		MaxBackups: cfg.MaxBackups,
+		MaxAge:     cfg.MaxAge,
+		Compress:   cfg.Compress,
+	}
+
+	return fileWriter, nil
+}
+
+// setupSyslogWriter configure le writer pour syslog
+func setupSyslogWriter(cfg loggerSyslogConfig) (io.Writer, error) {
+	// Utiliser un tag par défaut si non spécifié
+	tag := cfg.Tag
+	if tag == "" {
+		tag = "littleblog"
+	}
+	// Utiliser une priorité par défaut si non spécifiée
+	priority := cfg.Priority
+	if priority == 0 {
+		priority = syslog.LOG_INFO | syslog.LOG_LOCAL0
+	}
+
+	var writer *syslog.Writer
+	var err error
+
+	// Connexion locale ou distante
+	if cfg.Protocol == "" || cfg.Address == "" {
+		// Connexion locale (Unix socket)
+		writer, err = syslog.New(priority, tag)
+	} else {
+		// Connexion distante (TCP ou UDP)
+		writer, err = syslog.Dial(cfg.Protocol, cfg.Address, priority, tag)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to syslog: %w", err)
+	}
+
+	// Wrapper pour adapter syslog.Writer à io.Writer avec le bon niveau
+	return &SyslogLevelWriter{writer: writer}, nil
+}
+
+// Write implémente io.Writer et route vers la bonne fonction syslog selon le niveau
+func (w *SyslogLevelWriter) Write(p []byte) (n int, err error) {
+	msg := string(p)
+
+	// Parser le niveau depuis le JSON zerolog
+	level := extractLevelFromJSON(msg)
+
+	// Router vers la bonne méthode syslog selon le niveau
+	switch level {
+	case "debug":
+		return len(p), w.writer.Debug(msg)
+	case "info":
+		return len(p), w.writer.Info(msg)
+	case "warn", "warning":
+		return len(p), w.writer.Warning(msg)
+	case "error":
+		return len(p), w.writer.Err(msg)
+	case "fatal", "panic":
+		return len(p), w.writer.Crit(msg)
+	default:
+		// Par défaut, utiliser Info
+		return len(p), w.writer.Info(msg)
+	}
+}
+
+// extractLevelFromJSON extrait le niveau de log d'un message JSON zerolog
+// Format attendu: {"level":"info",...}
+func extractLevelFromJSON(msg string) string {
+	// Recherche simple du champ "level" dans le JSON
+	// Format: "level":"xxx"
+	startIdx := strings.Index(msg, `"level":"`)
+	if startIdx == -1 {
+		return ""
+	}
+
+	// Décaler après "level":"
+	startIdx += 9
+
+	// Trouver la fin (guillemet suivant)
+	endIdx := strings.Index(msg[startIdx:], `"`)
+	if endIdx == -1 {
+		return ""
+	}
+
+	return msg[startIdx : startIdx+endIdx]
+}
+
+func parseLevel(level string) zerolog.Level {
+	switch level {
+	case "debug":
+		return zerolog.DebugLevel
+	case "info":
+		return zerolog.InfoLevel
+	case "warn":
+		return zerolog.WarnLevel
+	case "error":
+		return zerolog.ErrorLevel
+	default:
+		return zerolog.InfoLevel
+	}
+}
+
+// WithFields retourne un logger avec des champs prédéfinis
+func WithFields(fields map[string]interface{}) zerolog.Logger {
+	ctx := log.With()
+	for k, v := range fields {
+		ctx = ctx.Interface(k, v)
+	}
+	return ctx.Logger()
+}
+
+// WithRequestID retourne un logger avec un request ID
+func WithRequestID(requestID string) zerolog.Logger {
+	return log.With().Str("request_id", requestID).Logger()
+}
+
+// Debug logue un message de debug
+func LogDebug(msg string) {
+	log.Debug().Msg(msg)
+}
+
+// Info logue un message d'information
+func LogInfo(msg string) {
+	log.Info().Msg(msg)
+}
+
+// Info logue avec printf
+func LogPrintf(format string, a ...any) {
+	log.Info().Msg(fmt.Sprintf(format, a...))
+}
+
+// Warn logue un avertissement
+func LogWarn(msg string) {
+	log.Warn().Msg(msg)
+}
+
+// Error logue une erreur
+func LogError(err error, msg string) {
+	log.Error().Err(err).Msg(msg)
+}
+
+// Fatal logue une erreur fatale et arrête le programme
+func LogFatal(err error, msg string) {
+	log.Fatal().Err(err).Str("msg", msg)
 }
 
 // handleExampleCreation creates an example configuration file
@@ -120,8 +379,8 @@ func handleExampleCreation() error {
 		return fmt.Errorf("erreur création exemple: %v", err)
 	}
 
-	fmt.Printf("✅ Fichier exemple créé: %s\n", filename)
-	fmt.Println("⚠️  N'oubliez pas de :")
+	fmt.Printf("Fichier exemple créé: %s\n", filename)
+	fmt.Println("/!\\  N'oubliez pas de :")
 	fmt.Println("   - Modifier l'email ACME")
 	fmt.Println("   - Changer les domaines")
 	fmt.Println("   - Retirer 'directory_url' pour utiliser Let's Encrypt production")
@@ -210,6 +469,15 @@ func createExampleConfig(filename string) error {
 				},
 			},
 		},
+		Logger: LoggerConfig{
+			Level: "info",
+			File: loggerFileConfig{
+				Enable: false,
+			},
+			Syslog: loggerSyslogConfig{
+				Enable: false,
+			},
+		},
 	}
 
 	data, err := yaml.Marshal(example)
@@ -276,6 +544,8 @@ func convertConfig(yamlConfig *Config) (*ProxyConfig, error) {
 		Firewall:   yamlConfig.Firewall,
 		TLS:        yamlConfig.TLS,
 		Routes:     make(map[string]*BackendTarget),
+		Logger:     yamlConfig.Logger,
+		Production: yamlConfig.Production,
 	}
 
 	for hostname, route := range yamlConfig.Routes {
@@ -348,7 +618,7 @@ func runServer(server *Server) error {
 
 // StartHTTPServer starts the HTTP-only server
 func (s *Server) StartHTTPServer() error {
-	fmt.Printf("🌐 Serveur HTTP démarré sur %s\n", s.config.ListenAddr)
+	LogPrintf("Serveur HTTP démarré sur %s", s.config.ListenAddr)
 	return http.ListenAndServe(s.config.ListenAddr, s.handler)
 }
 
@@ -368,8 +638,7 @@ func (s *Server) StartHTTPSServer() error {
 	if s.config.TLS.ACME != nil {
 		go s.startACMEHTTPServer()
 	}
-
-	fmt.Printf("🔒 Serveur HTTPS démarré sur :443\n")
+	log.Info().Msg("Serveur HTTPS démarré sur :443")
 
 	if s.config.TLS.ACME != nil {
 		return server.ListenAndServeTLS("", "")
@@ -408,7 +677,7 @@ func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
-	log.Printf("🔄 Redirection HTTP -> HTTPS: %s", target)
+	LogPrintf("Redirection HTTP -> HTTPS: %s", target)
 	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }
 
@@ -416,7 +685,7 @@ func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) startACMEHTTPServer() {
 	manager, err := setupACME(s.config.TLS)
 	if err != nil {
-		log.Printf("❌ Erreur ACME HTTP server: %v", err)
+		LogPrintf("❌ Erreur ACME HTTP server: %v", err)
 		return
 	}
 
@@ -429,18 +698,18 @@ func (s *Server) startACMEHTTPServer() {
 		httpMux.Handle("/", s.handler)
 	}
 
-	fmt.Printf("🌐 Serveur HTTP démarré sur :80 (ACME + %s)\n",
+	LogPrintf("🌐 Serveur HTTP démarré sur :80 (ACME + %s)",
 		map[bool]string{true: "redirection", false: "proxy"}[s.config.TLS.RedirectHTTP])
 
 	if err := http.ListenAndServe(":80", httpMux); err != nil {
-		log.Printf("❌ Erreur serveur HTTP: %v", err)
+		LogPrintf("❌ Erreur serveur HTTP: %v", err)
 	}
 }
 
 // DisplayConfiguration shows the server configuration
 func (s *Server) DisplayConfiguration(configFile string) {
-	fmt.Printf("🚀 hnProxy configuré\n")
-	fmt.Printf("📋 Configuration: %s\n", configFile)
+	LogPrintf("hnProxy configuré")
+	LogPrintf("Configuration: %s", configFile)
 
 	firewall := false
 	if s.config.Firewall != nil {
@@ -449,39 +718,39 @@ func (s *Server) DisplayConfiguration(configFile string) {
 
 		if withAntibot || withRateLimiter {
 			firewall = true
-			fmt.Printf("🛡️ Firewall activé\n")
+			LogPrintf("Firewall activé")
 			if withRateLimiter {
-				fmt.Printf("  • Rate Limiter activé à %d requettes par minute\n", s.config.Firewall.RateLimiter.Limit)
+				LogPrintf("  • Rate Limiter activé à %d requettes par minute", s.config.Firewall.RateLimiter.Limit)
 			}
 			if withAntibot {
-				fmt.Printf("  • 🤖 Antibot activé ")
+				LogPrintf("  • Antibot activé ")
 				if s.config.Firewall.Antibot.BlockLegitimeBots {
-					fmt.Printf("avec bloquage des bots légitimes\n")
+					LogPrintf("avec bloquage des bots légitimes")
 				} else {
-					fmt.Printf("sans bloquage des bots légitimes\n")
+					LogPrintf("sans bloquage des bots légitimes")
 				}
 			}
 		}
 
 	}
 	if !firewall {
-		fmt.Printf("🛡️ Firewall désactivé\n")
+		LogPrintf("Firewall désactivé")
 	}
 
 	if s.config.TLS != nil && s.config.TLS.Enabled {
-		fmt.Printf("🔒 HTTPS activé\n")
+		LogPrintf("HTTPS activé")
 		if s.config.TLS.ACME != nil {
-			fmt.Printf("🤖 ACME configuré pour: %v\n", s.config.TLS.ACME.Domains)
-			fmt.Printf("📧 Email: %s\n", s.config.TLS.ACME.Email)
-			fmt.Printf("📁 Cache: %s\n", s.config.TLS.ACME.CacheDir)
+			LogPrintf("ACME configuré pour: %v", s.config.TLS.ACME.Domains)
+			LogPrintf("Email: %s", s.config.TLS.ACME.Email)
+			LogPrintf("Cache: %s", s.config.TLS.ACME.CacheDir)
 		} else {
-			fmt.Printf("📜 Certificats: %s, %s\n", s.config.TLS.CertFile, s.config.TLS.KeyFile)
+			LogPrintf("Certificats: %s, %s", s.config.TLS.CertFile, s.config.TLS.KeyFile)
 		}
 	} else {
-		fmt.Printf("🌐 Mode HTTP\n")
+		LogPrintf("Mode HTTP")
 	}
 
-	fmt.Println("📋 Routes configurées:")
+	LogPrintf("Routes configurées:")
 	protocol := "http"
 	if s.config.TLS != nil && s.config.TLS.Enabled {
 		protocol = "https"
@@ -492,7 +761,7 @@ func (s *Server) DisplayConfiguration(configFile string) {
 		for i, u := range target.URLs {
 			backends[i] = u.String()
 		}
-		fmt.Printf("  • %s://%s -> %v\n", protocol, hostname, backends)
+		LogPrintf("  • %s://%s -> %v", protocol, hostname, backends)
 	}
 }
 
@@ -543,7 +812,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	// Chercher la route correspondante
 	target, exists := rph.config.Routes[hostname]
 	if !exists {
-		log.Printf("❌ Aucune route trouvée pour hostname: %s", hostname)
+		LogPrintf("❌ Aucune route trouvée pour hostname: %s", hostname)
 		http.Error(w, "Nom d'hôte non configuré", http.StatusNotFound)
 		return
 	}
@@ -551,7 +820,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	// Sélectionner le backend
 	backendURL := target.NextURL()
 	if backendURL == nil {
-		log.Printf("❌ Aucun backend disponible pour %s", hostname)
+		LogPrintf("❌ Aucun backend disponible pour %s", hostname)
 		http.Error(w, "Aucun backend disponible", http.StatusServiceUnavailable)
 		return
 	}
@@ -574,7 +843,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			req.Header.Set("X-Forwarded-For", r.RemoteAddr)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("❌ Erreur proxy %s -> %s: %v", hostname, backendURL.String(), err)
+			LogPrintf("❌ Erreur proxy %s -> %s: %v", hostname, backendURL.String(), err)
 			http.Error(w, "Service temporairement indisponible", http.StatusBadGateway)
 		},
 	}
@@ -583,7 +852,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if r.TLS != nil {
 		protocol = "HTTPS"
 	}
-	log.Printf("🔀 [%s] %s%s -> %s", protocol, hostname, r.URL.Path, backendURL.String())
+	LogPrintf("🔀 [%s] %s%s -> %s", protocol, hostname, r.URL.Path, backendURL.String())
 	proxy.ServeHTTP(w, r)
 }
 
@@ -732,7 +1001,7 @@ func NewFirewall(config *FirewallConfig) *Firewall {
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
 	if bd.config.RateLimiter != nil && bd.config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
-		log.Printf("🛡️	Rate limit dépassé pour %s", clientIP)
+		log.Warn().Msg(fmt.Sprintf("🛡️	Rate limit dépassé pour %s", clientIP))
 		bd.blockIP(clientIP, 15*time.Minute)
 		return true
 	}
@@ -742,14 +1011,14 @@ func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
 // IsBot vérifie si la requête provient d'un bot
 func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	userAgent := strings.ToLower(r.Header.Get("User-Agent"))
-	log.Printf("User Agent est : %s", userAgent)
+	LogPrintf("User Agent est : %s", userAgent)
 
 	// Vérifier les bots légitimes SI on veut les bloquer
 	if bd.config.Antibot != nil {
 		if bd.config.Antibot.Enabled && bd.config.Antibot.BlockLegitimeBots {
 			for _, bot := range bd.legitimateBots {
 				if strings.Contains(userAgent, bot) {
-					log.Printf("🛡️🤖	Bot légitime bloqué: %s depuis %s", bot, clientIP)
+					log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot légitime bloqué: %s depuis %s", bot, clientIP))
 					// Blocage plus court pour les bots légitimes (ils reviendront)
 					bd.blockIP(clientIP, 30*time.Minute)
 					return true
@@ -761,14 +1030,14 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 		if bd.config.Antibot.Enabled {
 			// Vérifier le User-Agent vide (suspect)
 			if userAgent == "" {
-				log.Printf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP)
+				log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP))
 				bd.blockIP(clientIP, 1*time.Hour)
 				return true
 			}
 
 			for _, botUA := range bd.botUserAgents {
 				if strings.Contains(userAgent, botUA) {
-					log.Printf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP)
+					log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP))
 					bd.blockIP(clientIP, 24*time.Hour)
 					return true
 				}
@@ -783,11 +1052,11 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 				// Si on ne bloque PAS les bots légitimes, vérifier si c'en est un
 				if !bd.config.Antibot.BlockLegitimeBots && bd.isLegitimateBot(userAgent) {
 					// C'est un bot légitime et on ne les bloque pas
-					log.Printf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP)
+					LogPrintf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP)
 					continue
 				}
 				// Sinon, c'est suspect et on bloque
-				log.Printf("🛡️	Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP)
+				log.Warn().Msg(fmt.Sprintf("🛡️	Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP))
 				bd.blockIP(clientIP, 6*time.Hour)
 				return true
 			}
@@ -796,7 +1065,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 
 	// Vérifications additionnelles
 	if bd.config.SuspiciousBehavior != nil && bd.config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
-		log.Printf("🛡️🤖	Comportement suspect détecté depuis %s", clientIP)
+		log.Warn().Msg(fmt.Sprintf("🛡️🤖	Comportement suspect détecté depuis %s", clientIP))
 		bd.blockIP(clientIP, 30*time.Minute)
 		return true
 	}
@@ -855,7 +1124,7 @@ func (bd *Firewall) blockIP(ip string, duration time.Duration) {
 	bd.mu.Lock()
 	defer bd.mu.Unlock()
 	bd.blockedIPs[ip] = time.Now().Add(duration)
-	log.Printf("🛡️	Ip '%s' bannie durant '%s'", ip, duration)
+	log.Warn().Msg(fmt.Sprintf("🛡️	Ip '%s' bannie durant '%s'", ip, duration))
 }
 
 // isIPBlocked vérifie si une IP est bloquée
@@ -997,15 +1266,16 @@ func main() {
 	// Handle example creation
 	if shouldCreateExample {
 		if err := handleExampleCreation(); err != nil {
-			log.Fatalf("❌ %v", err)
+			fmt.Printf("❌ %v\n", err)
 		}
 		return
 	}
 
 	// Load and validate configuration
 	config, err := loadAndValidateConfig(configFile)
+	initLogger(config.Logger, config.Production)
 	if err != nil {
-		log.Fatalf("❌ %v", err)
+		log.Fatal().Msg(fmt.Sprintf("❌ %v", err))
 	}
 
 	// Create and configure server
@@ -1014,6 +1284,6 @@ func main() {
 
 	// Start server
 	if err := runServer(server); err != nil {
-		log.Fatalf("❌ Erreur serveur: %v", err)
+		log.Fatal().Msg(fmt.Sprintf("❌ Erreur serveur: %v", err))
 	}
 }

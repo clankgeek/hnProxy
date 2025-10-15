@@ -38,8 +38,8 @@ make example
 Cela crée `hnproxy.yaml` :
 
 ```yaml
+production: true # mode production, n'affiche pas les logs en console
 listen: "0.0.0.0:8080"
-
 firewall:
     enabled: true
     ratelimiter:
@@ -73,6 +73,21 @@ routes:
   api.example.com:
     backends:
       - "http://127.0.0.1:5001"
+logger:
+  level: debug #"debug", "info", "warn", "error"
+  file:
+    enable: true # true pour activer le log en fichier
+    path: ./littleblog.log
+    maxsize: 100 #Taille max du fichier en Mo
+    maxbackups: 1 #Nombre max de fichiers de backup
+    maxAge: 30 #Nombre de jours avant suppression
+    compress: true #Compresser les anciens logs
+  syslog:
+    enable: false # true pour activer l'émission vers un serveur syslog
+    protocol: udp # "tcp", "udp", vide pour unix socket
+    address: 1.2.3.4 # addresse ip du serveur syslog, vide pour unix socket
+    tag: monBlogPerso
+    priority: 6 # LOG_INFO
 ```
 
 ### Modifier la configuration

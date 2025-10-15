@@ -2,31 +2,11 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
-Le format est basé sur [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-et ce projet adhère au [Versioning Sémantique](https://semver.org/spec/v2.0.0.html).
+## [1.3.0] - 2025-10-15
+- Ajout d'un logger (fichier et syslog)
 
-### Ajouté
-- Support HTTPS automatique via Let's Encrypt (ACME)
-- Load balancing round-robin pour les backends
-- Configuration via fichier YAML
-- Redirection HTTP vers HTTPS optionnelle
-- Headers de forwarding (X-Forwarded-*)
-- Service systemd pour installation système
-- Support Docker avec image optimisée
-- Tests unitaires et d'intégration
-- Pipeline CI/CD GitHub Actions
-- Scripts de build et test automatisés
-- Linting et vérifications sécurité
-- Documentation
-
-### Sécurité
-- Validation stricte des configurations
-- Gestion sécurisée des certificats ACME
-- Headers de sécurité par défaut
-- Antibot
-
-## [1.2.1] - 2025-10-04
-- Le hostname n'était pas transféré au backend
+## [1.2.1] - 2025-10-14
+- FIX: Le hostname n'était pas transféré au backend
 
 ## [1.2.0] - 2025-10-07
 - Configuration plus fine du firewall dans le fichier yaml

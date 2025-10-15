@@ -125,7 +125,7 @@ dev: build
 run: build
 	@echo "🏃 Running $(BINARY_NAME)..."
 	@if [ -f "proxy-config.yaml" ]; then \
-		sudo ./$(BUILD_DIR)/$(BINARY_NAME) -config proxy-config.yaml; \
+		./$(BUILD_DIR)/$(BINARY_NAME) -config proxy-config.yaml; \
 	else \
 		echo "❌ Configuration file 'proxy-config.yaml' not found"; \
 		echo "💡 Run 'make example' to create one"; \

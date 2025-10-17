@@ -14,19 +14,6 @@ Un reverse proxy moderne en Go avec support HTTPS automatique via Let's Encrypt 
 -  **Build multi-plateforme**
 -  **Firewall** avec limiteur de connexion et antibot
 
-## Installation rapide
-
-```bash
-# Setup complet pour nouveaux utilisateurs
-make setup
-
-# Ou étape par étape
-make deps          # Installer les dépendances
-make build         # Compiler
-make example       # Créer la config exemple
-make run           # Lancer le proxy
-```
-
 ## Configuration
 
 ### Créer la configuration
@@ -99,37 +86,20 @@ logger:
 
 ## Utilisation
 
-### Développement
+### Compilation
 
 ```bash
-# Lancer en mode dev
-make dev
-
-# Watch mode avec auto-reload (nécessite 'entr')
-make watch
-```
-
-### Production
-
-```bash
-# Build et run
+# construire et démarrer le programme
 make run
 
-# Ou installer système
-make install
-hnproxy -config /path/to/config.yaml
+# Construire le binaire
+make build
 ```
 
-### Service système
+### Compilation avec docker
 
 ```bash
-# Créer service systemd
-make systemd
-
-# Démarrer le service
-sudo systemctl enable hnproxy
-sudo systemctl start hnproxy
-sudo systemctl status hnproxy
+./docker-build.sh
 ```
 
 ## Commandes Make disponibles
@@ -137,15 +107,9 @@ sudo systemctl status hnproxy
 | Commande | Description |
 |----------|-------------|
 | `make` | Build le projet (défaut) |
-| `make setup` | Setup complet pour nouveaux utilisateurs |
 | `make build` | Compiler le binaire |
 | `make run` | Build et lancer avec la config |
-| `make dev` | Mode développement |
-| `make example` | Créer config exemple |
-| `make install` | Installer dans le système |
-| `make systemd` | Créer service systemd |
 | `make cross-compile` | Build multi-plateforme |
-| `make release` | Créer archives de release |
 | `make clean` | Nettoyer les artifacts |
 | `make help` | Afficher l'aide complète |
 
@@ -251,62 +215,12 @@ acme:
 ```bash
 # Build toutes les plateformes
 make cross-compile
-
-# Créer archives de release
-make release
 ```
 
 Plateformes supportées :
 - Linux (amd64, arm64)
 - macOS (amd64, arm64) 
 - Windows (amd64)
-
-## Monitoring
-
-### Logs
-
-```bash
-# Service systemd
-sudo journalctl -u hnproxy -f
-
-# Direct
-sudo ./hnproxy -config hnproxy.yaml
-```
-
-### Status
-
-```bash
-# Vérifier le service
-sudo systemctl status hnproxy
-
-# Certificats ACME
-ls -la ./certs/
-```
-
-## Dépannage
-
-### Port déjà utilisé
-
-```bash
-sudo netstat -tlnp | grep :80
-sudo netstat -tlnp | grep :443
-```
-
-### Certificats ACME
-
-```bash
-# Vider le cache et recommencer
-rm -rf ./certs/
-sudo systemctl restart hnproxy
-```
-
-### DNS
-
-```bash
-# Vérifier la résolution
-nslookup app1.example.com
-dig app1.example.com
-```
 
 ## Licence
 

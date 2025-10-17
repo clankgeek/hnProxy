@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
+	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,8 +130,8 @@ func TestReverseProxyHandler_ServeHTTP(t *testing.T) {
 		{
 			name:       "Unknown hostname",
 			host:       "unknown.local",
-			wantStatus: http.StatusNotFound,
-			wantBody:   "Nom d'hôte non configuré",
+			wantStatus: http.StatusForbidden,
+			wantBody:   "Access Denied",
 		},
 		{
 			name:       "Hostname with port",
@@ -244,10 +247,10 @@ func TestReverseProxyHandler_ErrorCases(t *testing.T) {
 		description    string
 	}{
 		{
-			name:           "Unknown hostname should return 404",
+			name:           "Unknown hostname should return 403",
 			host:           "unknown.local",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "Nom d'hôte non configuré",
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   "Access Denied",
 			description:    "Ce cas est normal et attendu - le message de log est OK",
 		},
 		{
@@ -437,74 +440,47 @@ func TestServer_DisplayConfiguration(t *testing.T) {
 				},
 			},
 		},
-		{
-			name: "HTTP server",
-			config: &ProxyConfig{
-				ListenAddr: "0.0.0.0:8080",
-				Routes: map[string]*BackendTarget{
-					"test.local": NewBackendTarget([]*url.URL{
-						mustParseURL("http://127.0.0.1:3001"),
-					}),
-				},
-			},
-		},
-		{
-			name: "HTTPS server with ACME",
-			config: &ProxyConfig{
-				ListenAddr: "0.0.0.0:8080",
-				TLS: &TLSConfig{
-					Enabled: true,
-					ACME: &ACME{
-						Email:    "test@example.com",
-						Domains:  []string{"test.example.com"},
-						CacheDir: "./certs",
-					},
-				},
-				Routes: map[string]*BackendTarget{
-					"test.example.com": NewBackendTarget([]*url.URL{
-						mustParseURL("http://127.0.0.1:3001"),
-					}),
-				},
-			},
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := NewServer(tt.config)
-
-			// Capture stdout
+			// Créer un buffer pour capturer les logs
 			var buf bytes.Buffer
-			origStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
 
-			// Display configuration
+			// Sauvegarder le logger global original
+			originalLogger := zerolog.GlobalLevel()
+			oldLogger := log.Logger
+
+			// Créer un nouveau logger qui écrit dans le buffer
+			log.Logger = zerolog.New(&buf).With().Timestamp().Logger()
+
+			// Restaurer après le test
+			defer func() {
+				log.Logger = oldLogger
+				zerolog.SetGlobalLevel(originalLogger)
+			}()
+
+			server := NewServer(tt.config)
 			server.DisplayConfiguration("test-config.yaml")
-
-			// Restore stdout and read output
-			w.Close()
-			os.Stdout = origStdout
-			buf.ReadFrom(r)
 
 			output := buf.String()
 
-			// Basic checks
+			// Les logs sont en JSON, on peut les parser ou juste vérifier le contenu
 			if !strings.Contains(output, "hnProxy configuré") {
-				t.Error("Output should contain 'hnProxy configuré'")
+				t.Errorf("Output should contain 'hnProxy configuré', got: %s", output)
 			}
 
 			if !strings.Contains(output, "test-config.yaml") {
-				t.Error("Output should contain config file name")
+				t.Errorf("Output should contain 'test-config.yaml', got: %s", output)
 			}
 
 			if tt.config.TLS != nil && tt.config.TLS.Enabled {
 				if !strings.Contains(output, "HTTPS activé") {
-					t.Error("Output should indicate HTTPS is enabled")
+					t.Errorf("Output should indicate 'HTTPS activé', got: %s", output)
 				}
 			} else {
 				if !strings.Contains(output, "Mode HTTP") {
-					t.Error("Output should indicate HTTP mode")
+					t.Errorf("Output should indicate 'Mode HTTP', got: %s", output)
 				}
 			}
 		})

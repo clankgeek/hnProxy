@@ -23,7 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const VERSION string = "1.2.0"
+const VERSION string = "1.3.1"
 
 // Backend target avec load balancing simple
 type BackendTarget struct {
@@ -170,8 +170,6 @@ func initLogger(cfg LoggerConfig, production bool) {
 			NoColor:    false,
 		}
 		writers = append(writers, consoleWriter)
-	} else {
-		writers = append(writers, os.Stdout)
 	}
 
 	// Writer pour le fichier si activé
@@ -183,13 +181,17 @@ func initLogger(cfg LoggerConfig, production bool) {
 		writers = append(writers, fileWriter)
 	}
 
-	// Wrtier syslog si activé
+	// Writer syslog si activé
 	if cfg.Syslog.Enable {
 		syslogWriter, err := setupSyslogWriter(cfg.Syslog)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to setup syslog writer")
 		}
 		writers = append(writers, syslogWriter)
+	}
+
+	if len(writers) == 0 {
+		writers = append(writers, os.Stdout)
 	}
 
 	// Créer un multi-writer
@@ -804,7 +806,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Access Denied", http.StatusForbidden)
 		msg := err.Error()
 		if msg != "" {
-			log.Print(msg)
+			log.Error().Msg(msg)
 		}
 		return
 	}
@@ -812,15 +814,15 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	// Chercher la route correspondante
 	target, exists := rph.config.Routes[hostname]
 	if !exists {
-		LogPrintf("❌ Aucune route trouvée pour hostname: %s", hostname)
-		http.Error(w, "Nom d'hôte non configuré", http.StatusNotFound)
+		log.Debug().Msg(fmt.Sprintf("❌ Invalid hostname: %s", hostname))
+		http.Error(w, "Access Denied", http.StatusForbidden)
 		return
 	}
 
 	// Sélectionner le backend
 	backendURL := target.NextURL()
 	if backendURL == nil {
-		LogPrintf("❌ Aucun backend disponible pour %s", hostname)
+		log.Debug().Msg(fmt.Sprintf("❌ Aucun backend disponible pour %s", hostname))
 		http.Error(w, "Aucun backend disponible", http.StatusServiceUnavailable)
 		return
 	}

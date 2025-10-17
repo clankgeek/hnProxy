@@ -2,6 +2,9 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.3.1] - 2025-10-17
+- Ajout d'un builder docker
+
 ## [1.3.0] - 2025-10-15
 - Ajout d'un logger (fichier et syslog)
 

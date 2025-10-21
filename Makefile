@@ -1,9 +1,18 @@
 # Variables
 BINARY_NAME=hnproxy
 BUILD_DIR=build
-VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION=$(shell git describe --tags --always 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X main.Version=${VERSION} -s -w"
 PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+
+# Package variables
+PKG_NAME=hnproxy
+PKG_VERSION=$(shell echo $(VERSION) | sed 's/^v//')
+PKG_MAINTAINER=Clank <clank@ik.me>
+PKG_DESCRIPTION=HTTP/HTTPS reverse proxy with automatic SSL certificate management
+PKG_HOMEPAGE=https://github.com/clankgeek/hnProxy
+DEB_DIR=$(BUILD_DIR)/deb
+DEB_PKG_DIR=$(DEB_DIR)/$(PKG_NAME)_$(PKG_VERSION)
 
 # Go parameters
 GOCMD=go
@@ -13,7 +22,7 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 
-.PHONY: all build clean test test-unit test-integration test-bench deps help run example cross-compile
+.PHONY: all build clean test test-unit test-integration test-bench deps help run example cross-compile deb deb-clean
 
 # Default target
 all: build
@@ -133,6 +142,158 @@ cross-compile: deps
 	done
 	@echo "✅ Cross-compilation complete"
 
+# Build Debian package for amd64
+deb: deb-clean
+	@echo "📦 Building Debian package..."
+	@mkdir -p $(DEB_PKG_DIR)/DEBIAN
+	@mkdir -p $(DEB_PKG_DIR)/usr/bin
+	@mkdir -p $(DEB_PKG_DIR)/etc/hnproxy
+	@mkdir -p $(DEB_PKG_DIR)/etc/systemd/system
+	@mkdir -p $(DEB_PKG_DIR)/var/lib/hnproxy/certs
+	@mkdir -p $(DEB_PKG_DIR)/var/log/hnproxy
+	
+	@echo "🔨 Building binary for linux/amd64..."
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DEB_PKG_DIR)/usr/bin/$(BINARY_NAME) .
+	
+	@echo "📝 Creating control file..."
+	@echo "Package: $(PKG_NAME)" > $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Version: $(PKG_VERSION)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Section: net" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Priority: optional" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Architecture: amd64" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Maintainer: $(PKG_MAINTAINER)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Description: $(PKG_DESCRIPTION)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo " A lightweight HTTP/HTTPS reverse proxy with automatic SSL" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo " certificate management using Let's Encrypt." >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Homepage: $(PKG_HOMEPAGE)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	
+	@echo "📝 Creating postinst script..."
+	@echo "#!/bin/bash" > $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "set -e" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "# Create hnproxy user if it doesn't exist" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "if ! id -u hnproxy > /dev/null 2>&1; then" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "    useradd --system --no-create-home --shell /bin/false hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "fi" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "# Set permissions" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "chown -R hnproxy:hnproxy /var/lib/hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "chown -R hnproxy:hnproxy /var/log/hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "chmod 750 /var/lib/hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "chmod 750 /var/log/hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "# Create example config if it doesn't exist" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "if [ ! -f /etc/hnproxy/config.yaml ]; then" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "    /usr/bin/hnproxy -example -config /etc/hnproxy/config.yaml > /dev/null 2>&1 || true" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "    chown hnproxy:hnproxy /etc/hnproxy/config.yaml" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "fi" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "# Reload systemd" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "systemctl daemon-reload" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "echo '✅ hnProxy installed successfully!'" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@echo "echo '📝 Edit /etc/hnproxy/config.yaml and run: systemctl start hnproxy'" >> $(DEB_PKG_DIR)/DEBIAN/postinst
+	@chmod 755 $(DEB_PKG_DIR)/DEBIAN/postinst
+	
+	@echo "📝 Creating prerm script..."
+	@echo "#!/bin/bash" > $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "set -e" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "# Stop service if running" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "if systemctl is-active --quiet hnproxy; then" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "    systemctl stop hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "fi" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "if systemctl is-enabled --quiet hnproxy 2>/dev/null; then" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "    systemctl disable hnproxy" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@echo "fi" >> $(DEB_PKG_DIR)/DEBIAN/prerm
+	@chmod 755 $(DEB_PKG_DIR)/DEBIAN/prerm
+	
+	@echo "📝 Creating systemd service file..."
+	@echo "[Unit]" > $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "Description=hnProxy - HTTP/HTTPS Reverse Proxy" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "After=network.target" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "[Service]" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "Type=simple" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "User=hnproxy" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "Group=hnproxy" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "ExecStart=/usr/bin/hnproxy -config /etc/hnproxy/config.yaml" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "Restart=on-failure" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "RestartSec=5s" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "# Security hardening" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "NoNewPrivileges=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "PrivateTmp=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "ProtectSystem=strict" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "ProtectHome=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "ReadWritePaths=/var/lib/hnproxy /var/log/hnproxy" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "# Give permissions to bind to ports 80 and 443" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "AmbientCapabilities=CAP_NET_BIND_SERVICE" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "[Install]" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "WantedBy=multi-user.target" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	
+	@echo "🔨 Building package..."
+	@dpkg-deb --build $(DEB_PKG_DIR)
+	@mv $(DEB_PKG_DIR).deb $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb
+	@echo "✅ Debian package created: $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb"
+	@echo ""
+	@echo "📦 Install with: sudo dpkg -i $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb"
+
+# Build Debian package for arm64
+deb-arm64: deb-clean
+	@echo "📦 Building Debian package for arm64..."
+	@mkdir -p $(DEB_PKG_DIR)/DEBIAN
+	@mkdir -p $(DEB_PKG_DIR)/usr/bin
+	@mkdir -p $(DEB_PKG_DIR)/etc/hnproxy
+	@mkdir -p $(DEB_PKG_DIR)/etc/systemd/system
+	@mkdir -p $(DEB_PKG_DIR)/var/lib/hnproxy/certs
+	@mkdir -p $(DEB_PKG_DIR)/var/log/hnproxy
+	
+	@echo "🔨 Building binary for linux/arm64..."
+	@GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(DEB_PKG_DIR)/usr/bin/$(BINARY_NAME) .
+	
+	@echo "📝 Creating control file..."
+	@echo "Package: $(PKG_NAME)" > $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Version: $(PKG_VERSION)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Section: net" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Priority: optional" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Architecture: arm64" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Maintainer: $(PKG_MAINTAINER)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Description: $(PKG_DESCRIPTION)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo " A lightweight HTTP/HTTPS reverse proxy with automatic SSL" >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo " certificate management using Let's Encrypt." >> $(DEB_PKG_DIR)/DEBIAN/control
+	@echo "Homepage: $(PKG_HOMEPAGE)" >> $(DEB_PKG_DIR)/DEBIAN/control
+	
+	# Copier les mêmes scripts postinst et prerm
+	@cp $(BUILD_DIR)/deb/$(PKG_NAME)_$(PKG_VERSION)/DEBIAN/postinst $(DEB_PKG_DIR)/DEBIAN/ 2>/dev/null || \
+		(echo "#!/bin/bash" > $(DEB_PKG_DIR)/DEBIAN/postinst && \
+		 echo "set -e" >> $(DEB_PKG_DIR)/DEBIAN/postinst && \
+		 chmod 755 $(DEB_PKG_DIR)/DEBIAN/postinst)
+	
+	@cp $(BUILD_DIR)/deb/$(PKG_NAME)_$(PKG_VERSION)/DEBIAN/prerm $(DEB_PKG_DIR)/DEBIAN/ 2>/dev/null || \
+		(echo "#!/bin/bash" > $(DEB_PKG_DIR)/DEBIAN/prerm && \
+		 echo "set -e" >> $(DEB_PKG_DIR)/DEBIAN/prerm && \
+		 chmod 755 $(DEB_PKG_DIR)/DEBIAN/prerm)
+	
+	@cp $(BUILD_DIR)/deb/$(PKG_NAME)_$(PKG_VERSION)/etc/systemd/system/hnproxy.service \
+		$(DEB_PKG_DIR)/etc/systemd/system/ 2>/dev/null || true
+	
+	@echo "🔨 Building package..."
+	@dpkg-deb --build $(DEB_PKG_DIR)
+	@mv $(DEB_PKG_DIR).deb $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_arm64.deb
+	@echo "✅ Debian package created: $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_arm64.deb"
+
+# Build all Debian packages
+deb-all: deb deb-arm64
+
+# Clean Debian build artifacts
+deb-clean:
+	@rm -rf $(DEB_DIR)
+	@rm -f $(BUILD_DIR)/*.deb
+
 # Quick setup for new users
 setup: init deps example
 	@echo "🎉 Setup complete!"
@@ -147,6 +308,7 @@ check:
 	@echo "🔍 Checking system requirements..."
 	@echo -n "Go version: "; $(GOCMD) version 2>/dev/null || echo "❌ Go not installed"
 	@echo -n "Git version: "; git --version 2>/dev/null || echo "⚠️  Git not installed (optional)"
+	@echo -n "dpkg-deb: "; dpkg-deb --version 2>/dev/null | head -n1 || echo "⚠️  dpkg-deb not installed (needed for 'make deb')"
 	@echo -n "Port 80 available: "; sudo netstat -tlnp | grep :80 > /dev/null && echo "❌ Port 80 in use" || echo "✅ Available"
 	@echo -n "Port 443 available: "; sudo netstat -tlnp | grep :443 > /dev/null && echo "❌ Port 443 in use" || echo "✅ Available"
 	@echo -n "Root privileges: "; [ $$(id -u) -eq 0 ] && echo "✅ Running as root" || echo "⚠️  Not running as root (needed for ports 80/443)"
@@ -169,6 +331,12 @@ help:
 	@echo "  make build          - Build the binary"
 	@echo "  make cross-compile  - Build for multiple platforms"
 	@echo "  make clean          - Clean build artifacts"
+	@echo ""
+	@echo "📦 Package Commands:"
+	@echo "  make deb            - Build Debian package (amd64)"
+	@echo "  make deb-arm64      - Build Debian package (arm64)"
+	@echo "  make deb-all        - Build all Debian packages"
+	@echo "  make deb-clean      - Clean Debian build artifacts"
 	@echo ""
 	@echo "🏃 Run Commands:"
 	@echo "  make run            - Build and run with proxy-config.yaml"

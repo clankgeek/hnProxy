@@ -19,6 +19,42 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func setConfig(config *ProxyConfig, firewall bool, tls bool) {
+	if firewall {
+		config.Firewall = &FirewallConfig{
+			RateLimiter:        &RateLimiterConfig{},
+			Antibot:            &AntiBotsConfig{},
+			PatternsFiltering:  &PatternsFilteringConfig{},
+			SuspiciousBehavior: &SuspiciousBehaviorConfig{},
+		}
+	}
+	if tls {
+		config.TLS = &TLSConfig{
+			ACME: &ACMEconfig{},
+		}
+	}
+}
+
+func NewFirewallConfig(withRateLimiter bool, limit int, withAntibot bool, withBlockLegitimeBots bool, withPatternsFiltering bool, withSuspiciousBehavior bool) *FirewallConfig {
+	return &FirewallConfig{
+		Enabled: true,
+		RateLimiter: &RateLimiterConfig{
+			Enabled: withRateLimiter,
+			Limit:   100,
+		},
+		Antibot: &AntiBotsConfig{
+			Enabled:           withAntibot,
+			BlockLegitimeBots: withBlockLegitimeBots,
+		},
+		PatternsFiltering: &PatternsFilteringConfig{
+			Enabled: withPatternsFiltering,
+		},
+		SuspiciousBehavior: &SuspiciousBehaviorConfig{
+			Enabled: withSuspiciousBehavior,
+		},
+	}
+}
+
 func TestRedirectToHTTPS(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -70,6 +106,7 @@ func TestNewServer(t *testing.T) {
 			}),
 		},
 	}
+	setConfig(config, true, true)
 
 	server := NewServer(config)
 
@@ -110,6 +147,7 @@ func TestReverseProxyHandler_ServeHTTP(t *testing.T) {
 			}),
 		},
 	}
+	setConfig(config, true, true)
 
 	// Create handler
 	firewall := NewFirewall(nil)
@@ -186,6 +224,7 @@ func TestReverseProxyHandler_LoadBalancing(t *testing.T) {
 			},
 		},
 	}
+	setConfig(config, true, true)
 
 	handler := NewReverseProxyHandler(config, nil)
 
@@ -236,6 +275,7 @@ func TestReverseProxyHandler_ErrorCases(t *testing.T) {
 			},
 		},
 	}
+	setConfig(config, true, true)
 
 	handler := NewReverseProxyHandler(config, nil)
 
@@ -313,6 +353,7 @@ func BenchmarkReverseProxyHandler_ServeHTTP(b *testing.B) {
 			},
 		},
 	}
+	setConfig(config, true, true)
 
 	handler := NewReverseProxyHandler(config, nil)
 
@@ -336,7 +377,7 @@ func TestHandleExampleCreation(t *testing.T) {
 		t.Fatalf("Failed to change to temp dir: %v", err)
 	}
 
-	err = handleExampleCreation()
+	err = handleExampleCreation("")
 	if err != nil {
 		t.Errorf("handleExampleCreation() error = %v", err)
 	}
@@ -427,7 +468,7 @@ func TestServer_DisplayConfiguration(t *testing.T) {
 				ListenAddr: "0.0.0.0:8080",
 				TLS: &TLSConfig{
 					Enabled: true,
-					ACME: &ACME{
+					ACME: &ACMEconfig{
 						Email:    "test@example.com",
 						Domains:  []string{"test.example.com"},
 						CacheDir: "./certs",
@@ -444,6 +485,7 @@ func TestServer_DisplayConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			setConfig(tt.config, true, true)
 			// Créer un buffer pour capturer les logs
 			var buf bytes.Buffer
 
@@ -618,6 +660,7 @@ func TestValidateConfig(t *testing.T) {
 						URLs: []*url.URL{mustParseURL("http://127.0.0.1:3001")},
 					},
 				},
+				TLS: &TLSConfig{ACME: &ACMEconfig{}},
 			},
 			wantErr: false,
 		},
@@ -629,6 +672,7 @@ func TestValidateConfig(t *testing.T) {
 						URLs: []*url.URL{mustParseURL("http://127.0.0.1:3001")},
 					},
 				},
+				TLS: &TLSConfig{ACME: &ACMEconfig{}},
 			},
 			wantErr: true,
 			errMsg:  "adresse d'écoute non définie",
@@ -648,6 +692,7 @@ func TestValidateConfig(t *testing.T) {
 				ListenAddr: "0.0.0.0:8080",
 				TLS: &TLSConfig{
 					Enabled: true,
+					ACME:    &ACMEconfig{},
 				},
 				Routes: map[string]*BackendTarget{
 					"app1.local": {
@@ -664,7 +709,8 @@ func TestValidateConfig(t *testing.T) {
 				ListenAddr: "0.0.0.0:8080",
 				TLS: &TLSConfig{
 					Enabled: true,
-					ACME: &ACME{
+					ACME: &ACMEconfig{
+						Enabled: true,
 						Email:   "test@example.com",
 						Domains: []string{"app1.example.com"},
 					},
@@ -683,7 +729,8 @@ func TestValidateConfig(t *testing.T) {
 				ListenAddr: "0.0.0.0:8080",
 				TLS: &TLSConfig{
 					Enabled: true,
-					ACME: &ACME{
+					ACME: &ACMEconfig{
+						Enabled: true,
 						Domains: []string{"app1.example.com"},
 					},
 				},
@@ -700,6 +747,7 @@ func TestValidateConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			setConfig(tt.config, true, false)
 			err := ValidateConfig(tt.config)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateConfig() error = %v, wantErr %v", err, tt.wantErr)
@@ -720,7 +768,7 @@ func TestCreateExampleConfig(t *testing.T) {
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 
-	err = createExampleConfig(tmpFile.Name())
+	err = createExampleConfig(tmpFile.Name(), false)
 	if err != nil {
 		t.Fatalf("createExampleConfig() failed: %v", err)
 	}
@@ -731,7 +779,8 @@ func TestCreateExampleConfig(t *testing.T) {
 		t.Fatalf("Failed to read created config: %v", err)
 	}
 
-	var config Config
+	config := NewConfig()
+
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
 		t.Fatalf("Generated config is not valid YAML: %v", err)
@@ -746,8 +795,8 @@ func TestCreateExampleConfig(t *testing.T) {
 		t.Error("Generated config has no routes")
 	}
 
-	if config.TLS == nil || !config.TLS.Enabled {
-		t.Error("Generated config should have TLS enabled")
+	if config.TLS.Enabled {
+		t.Error("Generated config should not have TLS enabled")
 	}
 }
 

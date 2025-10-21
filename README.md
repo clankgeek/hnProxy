@@ -44,12 +44,15 @@ tls:
   enabled: true
   redirect_http: true
   acme:
+    enabled: true #utiliser cert_file et key_file si vous n'utilisez pas ACME
     email: "admin@example.com"
     domains:
       - "app1.example.com"
       - "api.example.com"
     cache_dir: "./certs"
     directory_url: https://acme-staging-v02.api.letsencrypt.org/directory
+  cert_file:
+  key_file:
 
 routes:
   app1.example.com:
@@ -94,7 +97,12 @@ make run
 
 # Construire le binaire
 make build
+
+# Construire un deb
+make deb
 ```
+
+
 
 ### Compilation avec docker
 
@@ -208,6 +216,27 @@ Pour tester sans limites Let's Encrypt :
 ```yaml
 acme:
   directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
+```
+
+### ACME en local avec pebble
+
+Cloner le repos de pebble
+```bash
+git clone https://github.com/letsencrypt/pebble
+cd pebble
+```
+
+Editer docker-compose.yaml et supprimer -strict de command:
+Vous pouvez démarrer pebble
+
+```bash
+docker-compose up
+```
+
+Et utiliser
+```yaml
+acme:
+  directory_url: "https://localhost:14000/dir"
 ```
 
 ## Build multi-plateforme

@@ -23,7 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const VERSION string = "1.3.1"
+const VERSION string = "1.3.2"
 
 // Backend target avec load balancing simple
 type BackendTarget struct {
@@ -59,12 +59,12 @@ func (bt *BackendTarget) NextURL() *url.URL {
 
 // Configuration YAML
 type Config struct {
+	Production bool             `yaml:"production"`
 	Listen     string           `yaml:"listen"`
 	Firewall   *FirewallConfig  `yaml:"firewall"`
 	TLS        *TLSConfig       `yaml:"tls,omitempty"`
 	Routes     map[string]Route `yaml:"routes"`
 	Logger     LoggerConfig     `yaml:"logger"`
-	Production bool             `yaml:"production"`
 }
 
 type FirewallConfig struct {
@@ -94,14 +94,15 @@ type AntiBotsConfig struct {
 }
 
 type TLSConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	ACME         *ACME  `yaml:"acme,omitempty"`
-	CertFile     string `yaml:"cert_file,omitempty"`
-	KeyFile      string `yaml:"key_file,omitempty"`
-	RedirectHTTP bool   `yaml:"redirect_http"`
+	Enabled      bool        `yaml:"enabled"`
+	RedirectHTTP bool        `yaml:"redirect_http"`
+	ACME         *ACMEconfig `yaml:"acme"`
+	CertFile     string      `yaml:"cert_file"`
+	KeyFile      string      `yaml:"key_file"`
 }
 
-type ACME struct {
+type ACMEconfig struct {
+	Enabled      bool     `yaml:"enabled"`
 	Email        string   `yaml:"email"`
 	Domains      []string `yaml:"domains"`
 	CacheDir     string   `yaml:"cache_dir"`
@@ -213,7 +214,7 @@ func initLogger(cfg LoggerConfig, production bool) {
 		Str("level", cfg.Level).
 		Bool("log_to_file", cfg.File.Enable).
 		Bool("log_to_syslog", cfg.Syslog.Enable).
-		Msg("Logger initialized")
+		Msg("Logger initialisé")
 }
 
 // setupFileWriter configure le writer pour les fichiers
@@ -375,9 +376,13 @@ func LogFatal(err error, msg string) {
 }
 
 // handleExampleCreation creates an example configuration file
-func handleExampleCreation() error {
-	filename := "hnproxy.yaml"
-	if err := createExampleConfig(filename); err != nil {
+func handleExampleCreation(filename string) error {
+	absolute := true
+	if filename == "" {
+		filename = "hnproxy.yaml"
+		absolute = false
+	}
+	if err := createExampleConfig(filename, absolute); err != nil {
 		return fmt.Errorf("erreur création exemple: %v", err)
 	}
 
@@ -390,11 +395,7 @@ func handleExampleCreation() error {
 }
 
 // Configurer ACME autocert
-func setupACME(tlsConfig *TLSConfig) (*autocert.Manager, error) {
-	if tlsConfig.ACME == nil {
-		return nil, fmt.Errorf("configuration ACME manquante")
-	}
-
+func setupACME(tlsConfig *TLSConfig, production bool) (*autocert.Manager, error) {
 	// Créer le répertoire de cache s'il n'existe pas
 	if tlsConfig.ACME.CacheDir != "" {
 		if err := os.MkdirAll(tlsConfig.ACME.CacheDir, 0700); err != nil {
@@ -414,6 +415,17 @@ func setupACME(tlsConfig *TLSConfig) (*autocert.Manager, error) {
 		client := &acme.Client{
 			DirectoryURL: tlsConfig.ACME.DirectoryURL,
 		}
+
+		if !production {
+			client.HTTPClient = &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{
+						InsecureSkipVerify: true, // Pebble case
+					},
+				},
+			}
+		}
+
 		manager.Client = client
 	}
 
@@ -421,7 +433,7 @@ func setupACME(tlsConfig *TLSConfig) (*autocert.Manager, error) {
 }
 
 // Créer un fichier de configuration exemple
-func createExampleConfig(filename string) error {
+func createExampleConfig(filename string, absolute bool) error {
 	example := Config{
 		Listen: "0.0.0.0:8080",
 		Firewall: &FirewallConfig{
@@ -442,32 +454,12 @@ func createExampleConfig(filename string) error {
 			},
 		},
 		TLS: &TLSConfig{
-			Enabled: true,
-			ACME: &ACME{
-				Email:        "admin@example.com",
-				Domains:      []string{"app1.example.com", "app2.example.com", "api.example.com"},
-				CacheDir:     "./certs",
-				DirectoryURL: "https://acme-staging-v02.api.letsencrypt.org/directory", // Staging pour les tests
-			},
-			RedirectHTTP: true,
+			ACME: &ACMEconfig{},
 		},
 		Routes: map[string]Route{
 			"app1.example.com": {
 				Backends: []string{
-					"http://127.0.0.1:3001",
-					"http://127.0.0.1:3002",
-				},
-			},
-			"app2.example.com": {
-				Backends: []string{
-					"http://127.0.0.1:4001",
-				},
-			},
-			"api.example.com": {
-				Backends: []string{
-					"http://127.0.0.1:5001",
-					"http://127.0.0.1:5002",
-					"http://127.0.0.1:5003",
+					"http://127.0.0.1:8000",
 				},
 			},
 		},
@@ -480,6 +472,29 @@ func createExampleConfig(filename string) error {
 				Enable: false,
 			},
 		},
+	}
+	if absolute {
+		example.Production = true
+		example.Listen = "0.0.0.0:443"
+		example.TLS = &TLSConfig{
+			Enabled:      true,
+			RedirectHTTP: true,
+			ACME: &ACMEconfig{
+				Enabled:      true,
+				Email:        "admin@example.com",
+				Domains:      []string{"app1.example.com"},
+				CacheDir:     "/var/lib/hnproxy/certs",
+				DirectoryURL: "https://acme-staging-v02.api.letsencrypt.org/directory", // Staging pour les tests
+			},
+		}
+		example.Logger.File = loggerFileConfig{
+			Enable:     true,
+			Path:       "/var/log/hnproxy/hnproxy.log",
+			MaxSize:    100,
+			MaxBackups: 30,
+			MaxAge:     7,
+			Compress:   true,
+		}
 	}
 
 	data, err := yaml.Marshal(example)
@@ -523,8 +538,8 @@ func ValidateConfig(config *ProxyConfig) error {
 	}
 
 	// Validate TLS config if enabled
-	if config.TLS != nil && config.TLS.Enabled {
-		if config.TLS.ACME != nil {
+	if config.TLS.Enabled {
+		if config.TLS.ACME.Enabled {
 			if config.TLS.ACME.Email == "" {
 				return fmt.Errorf("email ACME requis")
 			}
@@ -532,7 +547,7 @@ func ValidateConfig(config *ProxyConfig) error {
 				return fmt.Errorf("domaines ACME requis")
 			}
 		} else if config.TLS.CertFile == "" || config.TLS.KeyFile == "" {
-			return fmt.Errorf("certificats TLS manquants")
+			return fmt.Errorf("certificats TLS manquants (cert_file ou key_file)")
 		}
 	}
 
@@ -576,19 +591,32 @@ func convertConfig(yamlConfig *Config) (*ProxyConfig, error) {
 	return proxyConfig, nil
 }
 
+func NewConfig() *Config {
+	return &Config{
+		Firewall: &FirewallConfig{
+			RateLimiter:        &RateLimiterConfig{},
+			Antibot:            &AntiBotsConfig{},
+			PatternsFiltering:  &PatternsFilteringConfig{},
+			SuspiciousBehavior: &SuspiciousBehaviorConfig{},
+		},
+		TLS: &TLSConfig{
+			ACME: &ACMEconfig{},
+		},
+	}
+}
+
 // Charger la configuration YAML
 func loadConfig(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("impossible de lire le fichier %s: %v", filename, err)
 	}
-
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	config := NewConfig()
+	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("erreur de parsing YAML: %v", err)
 	}
 
-	return &config, nil
+	return config, nil
 }
 
 type Server struct {
@@ -611,7 +639,7 @@ func NewServer(config *ProxyConfig) *Server {
 
 // runServer starts the appropriate server based on configuration
 func runServer(server *Server) error {
-	if server.config.TLS != nil && server.config.TLS.Enabled {
+	if server.config.TLS.Enabled {
 		return server.StartHTTPSServer()
 	} else {
 		return server.StartHTTPServer()
@@ -626,7 +654,7 @@ func (s *Server) StartHTTPServer() error {
 
 // StartHTTPSServer starts the HTTPS server with optional HTTP redirect
 func (s *Server) StartHTTPSServer() error {
-	if s.config.TLS == nil || !s.config.TLS.Enabled {
+	if !s.config.TLS.Enabled {
 		return fmt.Errorf("TLS non configuré")
 	}
 
@@ -636,25 +664,23 @@ func (s *Server) StartHTTPSServer() error {
 		return fmt.Errorf("erreur création serveur HTTPS: %v", err)
 	}
 
-	// Start HTTP server for ACME challenges and redirects
-	if s.config.TLS.ACME != nil {
-		go s.startACMEHTTPServer()
-	}
 	log.Info().Msg("Serveur HTTPS démarré sur :443")
 
-	if s.config.TLS.ACME != nil {
+	// Start HTTP server for ACME challenges and redirects
+	if s.config.TLS.ACME.Enabled {
+		go s.startACMEHTTPServer()
 		return server.ListenAndServeTLS("", "")
-	} else {
-		return server.ListenAndServeTLS(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 	}
+
+	return server.ListenAndServeTLS(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 }
 
 // createHTTPSServer creates the HTTPS server with proper TLS config
 func (s *Server) createHTTPSServer() (*http.Server, error) {
 	var tlsConfig *tls.Config
 
-	if s.config.TLS.ACME != nil {
-		manager, err := setupACME(s.config.TLS)
+	if s.config.TLS.ACME.Enabled {
+		manager, err := setupACME(s.config.TLS, s.config.Production)
 		if err != nil {
 			return nil, fmt.Errorf("erreur configuration ACME: %v", err)
 		}
@@ -685,7 +711,7 @@ func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
 
 // startACMEHTTPServer starts the HTTP server for ACME challenges and redirects
 func (s *Server) startACMEHTTPServer() {
-	manager, err := setupACME(s.config.TLS)
+	manager, err := setupACME(s.config.TLS, s.config.Production)
 	if err != nil {
 		LogPrintf("❌ Erreur ACME HTTP server: %v", err)
 		return
@@ -710,37 +736,46 @@ func (s *Server) startACMEHTTPServer() {
 
 // DisplayConfiguration shows the server configuration
 func (s *Server) DisplayConfiguration(configFile string) {
-	LogPrintf("hnProxy configuré")
+	LogInfo("hnProxy configuré")
 	LogPrintf("Configuration: %s", configFile)
 
 	firewall := false
-	if s.config.Firewall != nil {
-		withAntibot := s.config.Firewall.Antibot != nil && s.config.Firewall.Antibot.Enabled
-		withRateLimiter := s.config.Firewall.RateLimiter != nil && s.config.Firewall.RateLimiter.Enabled
+	if s.config.Firewall.Enabled {
+		withAntibot := s.config.Firewall.Antibot.Enabled
+		withRateLimiter := s.config.Firewall.RateLimiter.Enabled
+		withPatternFiltering := s.config.Firewall.PatternsFiltering.Enabled
+		withSuspiciousBehavior := s.config.Firewall.SuspiciousBehavior.Enabled
 
-		if withAntibot || withRateLimiter {
+		if withAntibot || withRateLimiter || withPatternFiltering || withSuspiciousBehavior {
 			firewall = true
-			LogPrintf("Firewall activé")
+			LogInfo("🛡️ Firewall activé")
 			if withRateLimiter {
 				LogPrintf("  • Rate Limiter activé à %d requettes par minute", s.config.Firewall.RateLimiter.Limit)
 			}
 			if withAntibot {
-				LogPrintf("  • Antibot activé ")
+				bot := "  • 🤖 Antibot activé "
 				if s.config.Firewall.Antibot.BlockLegitimeBots {
-					LogPrintf("avec bloquage des bots légitimes")
+					bot += "avec bloquage des bots légitimes"
 				} else {
-					LogPrintf("sans bloquage des bots légitimes")
+					bot += "sans bloquage des bots légitimes"
 				}
+				LogInfo(bot)
+			}
+			if withPatternFiltering {
+				LogInfo("Filtrage par pattern activé")
+			}
+			if withSuspiciousBehavior {
+				LogInfo("Filtrage sur action suspecte activé")
 			}
 		}
 
 	}
 	if !firewall {
-		LogPrintf("Firewall désactivé")
+		LogInfo("🛡️ Firewall désactivé")
 	}
 
-	if s.config.TLS != nil && s.config.TLS.Enabled {
-		LogPrintf("HTTPS activé")
+	if s.config.TLS.Enabled {
+		LogInfo("HTTPS activé")
 		if s.config.TLS.ACME != nil {
 			LogPrintf("ACME configuré pour: %v", s.config.TLS.ACME.Domains)
 			LogPrintf("Email: %s", s.config.TLS.ACME.Email)
@@ -749,12 +784,12 @@ func (s *Server) DisplayConfiguration(configFile string) {
 			LogPrintf("Certificats: %s, %s", s.config.TLS.CertFile, s.config.TLS.KeyFile)
 		}
 	} else {
-		LogPrintf("Mode HTTP")
+		LogInfo("Mode HTTP")
 	}
 
-	LogPrintf("Routes configurées:")
+	LogInfo("🔀 Routes configurées:")
 	protocol := "http"
-	if s.config.TLS != nil && s.config.TLS.Enabled {
+	if s.config.TLS.Enabled {
 		protocol = "https"
 	}
 
@@ -781,7 +816,7 @@ func NewReverseProxyHandler(config *ProxyConfig, firewall *Firewall) *ReversePro
 }
 
 func (rph *ReverseProxyHandler) Firewall(r *http.Request) error {
-	if rph.config.Firewall != nil && rph.config.Firewall.Enabled && rph.firewall != nil {
+	if rph.config.Firewall.Enabled && rph.firewall != nil {
 		clientIp := rph.firewall.GetClientIP(r)
 		if rph.firewall.isIPBlocked(clientIp) {
 			return fmt.Errorf("")
@@ -845,7 +880,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			req.Header.Set("X-Forwarded-For", r.RemoteAddr)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			LogPrintf("❌ Erreur proxy %s -> %s: %v", hostname, backendURL.String(), err)
+			log.Error().Msg(fmt.Sprintf("❌ Erreur proxy %s -> %s: %v", hostname, backendURL.String(), err))
 			http.Error(w, "Service temporairement indisponible", http.StatusBadGateway)
 		},
 	}
@@ -854,7 +889,7 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if r.TLS != nil {
 		protocol = "HTTPS"
 	}
-	LogPrintf("🔀 [%s] %s%s -> %s", protocol, hostname, r.URL.Path, backendURL.String())
+	log.Debug().Msg(fmt.Sprintf("🔀 [%s] %s%s -> %s", protocol, hostname, r.URL.Path, backendURL.String()))
 	proxy.ServeHTTP(w, r)
 }
 
@@ -884,26 +919,6 @@ type RateLimiter struct {
 	mu       sync.RWMutex
 	limit    int           // Nombre max de requêtes
 	window   time.Duration // Fenêtre de temps
-}
-
-func NewFirewallConfig(withRateLimiter bool, limit int, withAntibot bool, withBlockLegitimeBots bool, withPatternsFiltering bool, withSuspiciousBehavior bool) *FirewallConfig {
-	return &FirewallConfig{
-		Enabled: true,
-		RateLimiter: &RateLimiterConfig{
-			Enabled: withRateLimiter,
-			Limit:   100,
-		},
-		Antibot: &AntiBotsConfig{
-			Enabled:           withAntibot,
-			BlockLegitimeBots: withBlockLegitimeBots,
-		},
-		PatternsFiltering: &PatternsFilteringConfig{
-			Enabled: withPatternsFiltering,
-		},
-		SuspiciousBehavior: &SuspiciousBehaviorConfig{
-			Enabled: withSuspiciousBehavior,
-		},
-	}
 }
 
 // NewFirewall crée une nouvelle instance de Firewall
@@ -1002,7 +1017,7 @@ func NewFirewall(config *FirewallConfig) *Firewall {
 	}
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
-	if bd.config.RateLimiter != nil && bd.config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
+	if bd.config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
 		log.Warn().Msg(fmt.Sprintf("🛡️	Rate limit dépassé pour %s", clientIP))
 		bd.blockIP(clientIP, 15*time.Minute)
 		return true
@@ -1013,11 +1028,11 @@ func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
 // IsBot vérifie si la requête provient d'un bot
 func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	userAgent := strings.ToLower(r.Header.Get("User-Agent"))
-	LogPrintf("User Agent est : %s", userAgent)
+	log.Debug().Msg(fmt.Sprintf("🤖 User Agent est : %s", userAgent))
 
-	// Vérifier les bots légitimes SI on veut les bloquer
-	if bd.config.Antibot != nil {
-		if bd.config.Antibot.Enabled && bd.config.Antibot.BlockLegitimeBots {
+	if bd.config.Antibot.Enabled {
+		// Vérifier les bots légitimes SI on veut les bloquer
+		if bd.config.Antibot.BlockLegitimeBots {
 			for _, bot := range bd.legitimateBots {
 				if strings.Contains(userAgent, bot) {
 					log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot légitime bloqué: %s depuis %s", bot, clientIP))
@@ -1028,33 +1043,31 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 			}
 		}
 
-		// Vérifier les User-Agents de bots connus (malveillants)
-		if bd.config.Antibot.Enabled {
-			// Vérifier le User-Agent vide (suspect)
-			if userAgent == "" {
-				log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP))
-				bd.blockIP(clientIP, 1*time.Hour)
-				return true
-			}
+		// Vérifier le User-Agent vide (suspect)
+		if userAgent == "" {
+			log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot détecté: User-Agent vide depuis %s", clientIP))
+			bd.blockIP(clientIP, 1*time.Hour)
+			return true
+		}
 
-			for _, botUA := range bd.botUserAgents {
-				if strings.Contains(userAgent, botUA) {
-					log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP))
-					bd.blockIP(clientIP, 24*time.Hour)
-					return true
-				}
+		// Vérifier les User-Agents de bots connus (malveillants)
+		for _, botUA := range bd.botUserAgents {
+			if strings.Contains(userAgent, botUA) {
+				log.Warn().Msg(fmt.Sprintf("🛡️🤖	Bot malveillant détecté: %s depuis %s", botUA, clientIP))
+				bd.blockIP(clientIP, 24*time.Hour)
+				return true
 			}
 		}
 	}
 
 	// Vérifier les patterns suspects
-	if bd.config.PatternsFiltering != nil && bd.config.PatternsFiltering.Enabled {
+	if bd.config.PatternsFiltering.Enabled {
 		for _, pattern := range bd.suspiciousPatterns {
 			if strings.Contains(userAgent, pattern) {
 				// Si on ne bloque PAS les bots légitimes, vérifier si c'en est un
 				if !bd.config.Antibot.BlockLegitimeBots && bd.isLegitimateBot(userAgent) {
 					// C'est un bot légitime et on ne les bloque pas
-					LogPrintf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP)
+					log.Debug().Msg(fmt.Sprintf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP))
 					continue
 				}
 				// Sinon, c'est suspect et on bloque
@@ -1066,7 +1079,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	}
 
 	// Vérifications additionnelles
-	if bd.config.SuspiciousBehavior != nil && bd.config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
+	if bd.config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
 		log.Warn().Msg(fmt.Sprintf("🛡️🤖	Comportement suspect détecté depuis %s", clientIP))
 		bd.blockIP(clientIP, 30*time.Minute)
 		return true
@@ -1239,7 +1252,7 @@ func parseCommandLineArgs() (configFile string, shouldCreateExample bool, versio
 	}
 
 	if *example {
-		return "", true, false, nil
+		return *config, true, false, nil
 	}
 
 	if *config == "" {
@@ -1267,7 +1280,7 @@ func main() {
 
 	// Handle example creation
 	if shouldCreateExample {
-		if err := handleExampleCreation(); err != nil {
+		if err := handleExampleCreation(configFile); err != nil {
 			fmt.Printf("❌ %v\n", err)
 		}
 		return

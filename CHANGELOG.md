@@ -2,27 +2,15 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
-## [1.3.2] - 2025-10-22
-- Ajout du build du paquet deb avec "make deb"
-- Possibilité d'utiliser ACME en local via pebble pour faire des tests
-- Fix: Crash lors de l'absence de configuration firewall dans le yaml
-
-## [1.3.1] - 2025-10-17
-- Ajout d'un builder docker
-
-## [1.3.0] - 2025-10-15
-- Ajout d'un logger (fichier et syslog)
-
-## [1.2.1] - 2025-10-14
-- Fix: Le hostname n'était pas transféré au backend
-
-## [1.2.0] - 2025-10-07
-- Configuration plus fine du firewall dans le fichier yaml
-
-## [1.1.0] - 2025-09-17
-- Ajout d'un firewall avec
+## [1.4.0] - 2025-10-24
+- Ajout d'un firewall
   - Rate limiter
   - Antibot
+- Fix: Le hostname n'était pas transféré au backend
+- Fix: message context close
+- Ajout d'un logger (fichier et syslog)
+- Ajout d'un builder docker
+- Possibilité d'utiliser ACME en local via pebble pour faire des tests
 
 ## [1.0.0] - 2025-09-09
 

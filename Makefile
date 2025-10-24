@@ -226,7 +226,7 @@ deb: deb-clean
 	@echo "NoNewPrivileges=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
 	@echo "PrivateTmp=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
 	@echo "ProtectSystem=strict" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
-	@echo "ProtectHome=true" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
+	@echo "ProtectHome=false" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
 	@echo "ReadWritePaths=/var/lib/hnproxy /var/log/hnproxy" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
 	@echo "" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
 	@echo "# Give permissions to bind to ports 80 and 443" >> $(DEB_PKG_DIR)/etc/systemd/system/hnproxy.service
@@ -238,6 +238,7 @@ deb: deb-clean
 	@echo "🔨 Building package..."
 	@dpkg-deb --build $(DEB_PKG_DIR)
 	@mv $(DEB_PKG_DIR).deb $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb
+	@rm -rf $(DEB_DIR)
 	@echo "✅ Debian package created: $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb"
 	@echo ""
 	@echo "📦 Install with: sudo dpkg -i $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_amd64.deb"
@@ -284,6 +285,7 @@ deb-arm64: deb-clean
 	@echo "🔨 Building package..."
 	@dpkg-deb --build $(DEB_PKG_DIR)
 	@mv $(DEB_PKG_DIR).deb $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_arm64.deb
+	@rm -rf $(DEB_DIR)
 	@echo "✅ Debian package created: $(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_arm64.deb"
 
 # Build all Debian packages

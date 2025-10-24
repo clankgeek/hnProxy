@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/syslog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const VERSION string = "1.3.2"
+const VERSION string = "1.4.0"
 
 // Backend target avec load balancing simple
 type BackendTarget struct {
@@ -691,9 +694,9 @@ func (s *Server) createHTTPSServer() (*http.Server, error) {
 		Addr:         ":443",
 		Handler:      s.handler,
 		TLSConfig:    tlsConfig,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	return server, nil
@@ -868,7 +871,9 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			req.URL.Scheme = backendURL.Scheme
 			req.URL.Host = backendURL.Host
 
-			// Ajouter des headers utiles
+			// Conserver les headers de cache
+			// If-Modified-Since, If-None-Match, etc. sont déjà copiés par défaut
+
 			if req.Header.Get("X-Forwarded-Proto") == "" {
 				if req.TLS != nil {
 					req.Header.Set("X-Forwarded-Proto", "https")
@@ -879,8 +884,35 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			req.Header.Set("X-Forwarded-Host", r.Host)
 			req.Header.Set("X-Forwarded-For", r.RemoteAddr)
 		},
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second, // Important !
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Error().Msg(fmt.Sprintf("❌ Erreur proxy %s -> %s: %v", hostname, backendURL.String(), err))
+			// Ignorer silencieusement les annulations client (comportement normal)
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Error().Msg(fmt.Sprintf("⏱️  Timeout: %s -> %s", hostname, backendURL.String()))
+				http.Error(w, "Gateway Timeout", http.StatusGatewayTimeout)
+				return
+			}
+
+			log.Error().
+				Err(err).
+				Str("hostname", hostname).
+				Str("backend", backendURL.String()).
+				Str("path", r.URL.Path).
+				Msg("Erreur proxy")
 			http.Error(w, "Service temporairement indisponible", http.StatusBadGateway)
 		},
 	}

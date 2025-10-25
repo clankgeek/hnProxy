@@ -1,7 +1,7 @@
 # Variables
 BINARY_NAME=hnproxy
 BUILD_DIR=build
-VERSION=$(shell git describe --tags --always 2>/dev/null || echo "dev")
+VERSION=$(shell grep  "const VERSION string = " main.go | egrep "[0-9\.]+" -o)
 LDFLAGS=-ldflags "-X main.Version=${VERSION} -s -w"
 PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 

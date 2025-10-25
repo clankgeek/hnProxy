@@ -2,10 +2,13 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
-## [1.4.0] - 2025-10-24
+## [1.1.0] - 2025-10-26
+- Controle du host lors de la redirection http vers https
+- Ajout Redirection permanente directement depuis le yaml
 - Ajout d'un firewall
   - Rate limiter
   - Antibot
+  - Pattern filtering
 - Fix: Le hostname n'était pas transféré au backend
 - Fix: message context close
 - Ajout d'un logger (fichier et syslog)

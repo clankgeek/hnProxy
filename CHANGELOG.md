@@ -2,6 +2,10 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.4.1] - 2025-10-25
+- Controle du host lors de la redirection http vers https
+- Redirection permanente directement depuis le yaml
+
 ## [1.4.0] - 2025-10-24
 - Ajout d'un firewall
   - Rate limiter

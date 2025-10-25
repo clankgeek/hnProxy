@@ -64,26 +64,38 @@ func TestRedirectToHTTPS(t *testing.T) {
 		{
 			name:     "Simple redirect",
 			url:      "http://example.com/",
-			expected: "https://example.com/",
+			expected: "https://www.example.com/",
 		},
 		{
 			name:     "With path",
 			url:      "http://example.com/api/users",
-			expected: "https://example.com/api/users",
+			expected: "https://www.example.com/api/users",
 		},
 		{
 			name:     "With query params",
 			url:      "http://example.com/search?q=test&page=1",
-			expected: "https://example.com/search?q=test&page=1",
+			expected: "https://www.example.com/search?q=test&page=1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			config := &ProxyConfig{
+				Redirection: map[string]string{
+					"example.com": "www.example.com",
+				},
+				Routes: map[string]*BackendTarget{
+					"www.example.com": NewBackendTarget([]*url.URL{
+						mustParseURL("http://127.0.0.1:3001"),
+					}),
+				},
+			}
+			setConfig(config, true, true)
+			s := NewServer(config)
 			req := httptest.NewRequest("GET", tt.url, nil)
 			rr := httptest.NewRecorder()
 
-			redirectToHTTPS(rr, req)
+			s.redirect(rr, req)
 
 			if rr.Code != http.StatusMovedPermanently {
 				t.Errorf("redirectToHTTPS() status = %v, want %v", rr.Code, http.StatusMovedPermanently)

@@ -47,22 +47,21 @@ tls:
     enabled: true #utiliser cert_file et key_file si vous n'utilisez pas ACME
     email: "admin@example.com"
     domains:
-      - "app1.example.com"
-      - "api.example.com"
+      - "example.com"
+      - "www.example.com"
     cache_dir: "./certs"
     directory_url: https://acme-staging-v02.api.letsencrypt.org/directory
   cert_file:
   key_file:
 
+redirection:
+  example.com: www.example.com
+
 routes:
-  app1.example.com:
+  www.example.com:
     backends:
-      - "http://127.0.0.1:3001"
-      - "http://127.0.0.1:3002"
-  
-  api.example.com:
-    backends:
-      - "http://127.0.0.1:5001"
+      - "http://127.0.0.1:8080"
+
 logger:
   level: debug #"debug", "info", "warn", "error"
   file:

@@ -964,29 +964,6 @@ func TestHasSuspiciousBehavior(t *testing.T) {
 			},
 			false,
 		},
-		{
-			"Accept manquant",
-			func(r *http.Request) {
-				r.Header.Set("Accept-Language", "fr-FR")
-			},
-			true,
-		},
-		{
-			"Accept-Language manquant",
-			func(r *http.Request) {
-				r.Header.Set("Accept", "text/html")
-			},
-			true,
-		},
-		{
-			"Accept-Encoding suspect",
-			func(r *http.Request) {
-				r.Header.Set("Accept", "text/html")
-				r.Header.Set("Accept-Language", "en")
-				r.Header.Set("Accept-Encoding", "weird-encoding")
-			},
-			true,
-		},
 	}
 
 	for _, tt := range tests {

@@ -2,6 +2,9 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.2.0] - dev
+- choix du blockmessage, avec 403, 404, 418 ou slowfake
+
 ## [1.1.0] - 2025-10-26
 - Controle du host lors de la redirection http vers https
 - Ajout Redirection permanente directement depuis le yaml

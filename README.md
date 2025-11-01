@@ -29,6 +29,7 @@ production: true # mode production, n'affiche pas les logs en console
 listen: "0.0.0.0:8080"
 firewall:
     enabled: true
+    blockmessage: forbidden # forbidden, notfound, teapot, slowfake
     ratelimiter:
         enabled: true
         limit: 100
@@ -127,6 +128,7 @@ make deb
 ```yaml
 firewall:
     enabled: true
+    blockmessage: forbidden
     ratelimiter:
         enabled: true
         limit: 100
@@ -138,6 +140,12 @@ firewall:
     suspiciousbehavior:
         enabled: false
 ```
+
+- blockmessage: choix du type de bloquage
+  - forbidden, retourne un code type 403
+  - notfound, retourne un code de type 404
+  - teapot, retourne un code type 418 et affiche une théière en plein écran au format svg
+  - slowfake, retourn un code type 200 et affiche des paragraphes de lorem très lentement 
 
 - Rate limiter en requette par minute
 - Antibot avec possibilité de laisser passer les good bots

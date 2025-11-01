@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/syslog"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -73,6 +74,7 @@ type Config struct {
 
 type FirewallConfig struct {
 	Enabled            bool                      `yaml:"enabled"`
+	BlockMessage       string                    `yaml:"blockmessage"`
 	RateLimiter        *RateLimiterConfig        `yaml:"ratelimiter"`
 	Antibot            *AntiBotsConfig           `yaml:"antibot"`
 	PatternsFiltering  *PatternsFilteringConfig  `yaml:"patternsfiltering"`
@@ -442,7 +444,8 @@ func createExampleConfig(filename string, absolute bool) error {
 	example := Config{
 		Listen: "0.0.0.0:8080",
 		Firewall: &FirewallConfig{
-			Enabled: true,
+			Enabled:      true,
+			BlockMessage: "forbidden",
 			RateLimiter: &RateLimiterConfig{
 				Enabled: false,
 				Limit:   100,
@@ -620,11 +623,11 @@ func loadConfig(filename string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("impossible de lire le fichier %s: %v", filename, err)
 	}
+
 	config := NewConfig()
 	if err := yaml.Unmarshal(data, config); err != nil {
 		return nil, fmt.Errorf("erreur de parsing YAML: %v", err)
 	}
-
 	return config, nil
 }
 
@@ -793,6 +796,16 @@ func (s *Server) DisplayConfiguration(configFile string) {
 		if withAntibot || withRateLimiter || withPatternFiltering || withSuspiciousBehavior {
 			firewall = true
 			LogPrintf("🛡️ Firewall activé")
+			switch s.config.Firewall.BlockMessage {
+			case "slowfake":
+				LogPrintf("  • Block message mode : 200 slowfake")
+			case "teapot":
+				LogPrintf("  • Block message mode : 418 teapot")
+			case "notfound":
+				LogPrintf("  • Block message mode : 404 not found")
+			default:
+				LogPrintf("  • Block message mode : 403 forbidden")
+			}
 			if withRateLimiter {
 				LogPrintf("  • Rate Limiter activé à %d requettes par minute", s.config.Firewall.RateLimiter.Limit)
 			}
@@ -904,6 +917,163 @@ func (rph *ReverseProxyHandler) Firewall(r *http.Request) error {
 	return nil
 }
 
+func (rph *ReverseProxyHandler) serveTeaPot(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.WriteHeader(http.StatusTeapot) // 418 I'm a teapot
+
+	// Paramètres aléatoires pour la théière
+	bodyWidth := 120 + rand.Intn(80)   // 120-200
+	bodyHeight := 100 + rand.Intn(60)  // 100-160
+	lidWidth := 60 + rand.Intn(40)     // 60-100
+	spoutCurve := 580 + rand.Intn(60)  // courbure du bec
+	handleCurve := 160 + rand.Intn(60) // courbure de l'anse
+
+	// Couleurs aléatoires
+	colors := []string{
+		"#8B4513", // marron
+		"#CD853F", // beige
+		"#4A90E2", // bleu
+		"#E74C3C", // rouge
+		"#2ECC71", // vert
+		"#9B59B6", // violet
+		"#F39C12", // orange
+	}
+	mainColor := colors[rand.Intn(len(colors))]
+
+	// Position et taille de la vapeur
+	steamCount := 2 + rand.Intn(3) // 2-4 jets de vapeur
+
+	svg := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%%" height="100%%" preserveAspectRatio="xMidYMid meet">
+  <style>
+    svg { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); }
+    .teapot { fill: %s; stroke: #333; stroke-width: 2; }
+    .shine { fill: white; opacity: 0.3; }
+    .steam { fill: #E0E0E0; opacity: 0.7; }
+  </style>
+  
+  <!-- Steam animation -->
+  <g class="steam">`, mainColor)
+
+	// Génération aléatoire des jets de vapeur
+	for i := 0; i < steamCount; i++ {
+		x := 350 + i*30 + rand.Intn(20)
+		y := 150 + rand.Intn(20)
+		rx := 10 + rand.Intn(10)
+		ry := 20 + rand.Intn(15)
+		dur := 2.5 + rand.Float64()
+
+		svg += fmt.Sprintf(`
+    <ellipse cx="%d" cy="%d" rx="%d" ry="%d">
+      <animate attributeName="cy" values="%d;%d;%d" dur="%.1fs" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.7;0.4;0" dur="%.1fs" repeatCount="indefinite"/>
+    </ellipse>`, x, y, rx, ry, y, y-50, y-100, dur, dur)
+	}
+
+	svg += fmt.Sprintf(`
+  </g>
+  
+  <!-- Teapot body -->
+  <ellipse class="teapot" cx="400" cy="400" rx="%d" ry="%d"/>
+  
+  <!-- Teapot lid -->
+  <ellipse class="teapot" cx="400" cy="280" rx="%d" ry="30"/>
+  <rect class="teapot" x="%d" y="250" width="40" height="30" rx="5"/>
+  <ellipse class="teapot" cx="400" cy="250" rx="20" ry="15"/>
+  
+  <!-- Spout -->
+  <path class="teapot" d="M 550 350 Q %d 350 620 380 Q 630 400 620 420 Q %d 450 550 450 L 550 350 Z"/>
+  
+  <!-- Handle -->
+  <path class="teapot" d="M 250 320 Q 200 320 %d 360 Q 170 400 %d 440 Q 200 480 250 480" 
+        fill="none" stroke="#333" stroke-width="25" stroke-linecap="round"/>
+  
+  <!-- Shine effects -->
+  <ellipse class="shine" cx="350" cy="360" rx="40" ry="60"/>
+  <ellipse class="shine" cx="320" cy="320" rx="20" ry="30"/>
+  
+  <!-- Text -->
+  <text x="400" y="550" font-family="Arial, sans-serif" font-size="24" fill="white" text-anchor="middle" font-weight="bold">
+    418 - I'm a teapot! ☕
+  </text>
+</svg>`,
+		bodyWidth, bodyHeight,
+		lidWidth, 400-20,
+		spoutCurve, spoutCurve,
+		handleCurve, handleCurve)
+
+	w.Write([]byte(svg))
+}
+
+func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	// Textes Lorem Ipsum variés
+	loremParagraphs := []string{
+		"<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>",
+		"<p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>",
+		"<p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>",
+		"<p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>",
+		"<p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>",
+		"<p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.</p>",
+		"<p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.</p>",
+		"<p>At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti.</p>",
+	}
+
+	header := `<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chargement...</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        h1 { color: #333; }
+        p { line-height: 1.6; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Veuillez patienter...</h1>
+`
+
+	footer := `
+    <footer style="margin-top: 50px; text-align: center; color: #999;">
+        <p>&copy; 2025 - Tous droits réservés</p>
+    </footer>
+</body>
+</html>`
+
+	// Envoie le header
+	w.Write([]byte(header))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Envoie les paragraphes un par un
+	numParagraphs := 10 + rand.Intn(20)
+
+	for i := 0; i < numParagraphs; i++ {
+		paragraph := loremParagraphs[rand.Intn(len(loremParagraphs))]
+
+		w.Write([]byte(paragraph + "\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		// Délai aléatoire entre 200ms et 800ms
+		delay := 200 + rand.Intn(600)
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+
+	// Envoie le footer
+	w.Write([]byte(footer))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hostname := strings.Split(r.Host, ":")[0]
 
@@ -918,10 +1088,19 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	err := rph.Firewall(r)
 	if err != nil {
-		http.Error(w, "Access Denied", http.StatusForbidden)
 		msg := err.Error()
 		if msg != "" {
 			log.Error().Msg(msg)
+		}
+		switch rph.firewall.config.BlockMessage {
+		case "notfound":
+			http.Error(w, "Page not found", http.StatusNotFound)
+		case "slowfake":
+			rph.serveSlowFake(w)
+		case "teapot":
+			rph.serveTeaPot(w)
+		default:
+			http.Error(w, "Access Denied", http.StatusForbidden)
 		}
 		return
 	}
@@ -1180,7 +1359,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 					continue
 				}
 				// Sinon, c'est suspect et on bloque
-				log.Warn().Msg(fmt.Sprintf("🛡️	Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP))
+				log.Warn().Msg(fmt.Sprintf("🛡️ Pattern suspect détecté: %s dans %s depuis %s", pattern, userAgent, clientIP))
 				bd.blockIP(clientIP, 6*time.Hour)
 				return true
 			}

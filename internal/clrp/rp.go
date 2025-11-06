@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hnproxy/internal/clbackend"
 	"hnproxy/internal/clconfig"
 	"hnproxy/internal/clfirewall"
 	"math/rand"
@@ -202,6 +203,18 @@ func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
 	}
 }
 
+func (rph *ReverseProxyHandler) getTargetHostname(w http.ResponseWriter, r *http.Request, hostname string) *clbackend.BackendTarget {
+	target, exists := rph.Config.Routes[hostname]
+	if !exists {
+		log.Debug().Msg(fmt.Sprintf("❌ Invalid hostname: source: %s, hostname: %s", rph.Firewall.GetClientIP(r), r.Host))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf("<!DOCTYPE html>\n<html><body>Are you lost? To help you, today is %s</body></html>", time.Now().Format(time.RFC850))))
+		return nil
+	}
+	return target
+}
+
 func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hostname := strings.Split(r.Host, ":")[0]
 
@@ -211,6 +224,12 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			host = host + ":" + port
 		}
 		Redirection(host, w, r)
+		return
+	}
+
+	// Chercher la route correspondante
+	target := rph.getTargetHostname(w, r, hostname)
+	if target == nil {
 		return
 	}
 
@@ -230,14 +249,6 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		default:
 			http.Error(w, "Access Denied", http.StatusForbidden)
 		}
-		return
-	}
-
-	// Chercher la route correspondante
-	target, exists := rph.Config.Routes[hostname]
-	if !exists {
-		log.Debug().Msg(fmt.Sprintf("❌ Invalid hostname: source: %s, hostname: %s", rph.Firewall.GetClientIP(r), r.Host))
-		http.Error(w, "Access Denied", http.StatusForbidden)
 		return
 	}
 

@@ -111,6 +111,9 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 			"pinterest",
 			"quora",
 			"redditbot",
+
+			// RSS
+			"feedly",
 		},
 		suspiciousPatterns: []string{
 			"bot",

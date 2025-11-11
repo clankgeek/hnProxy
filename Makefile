@@ -2,7 +2,7 @@
 BINARY_NAME=hnproxy
 BUILD_DIR=build
 VERSION=$(shell grep  "const VERSION string = " main.go | egrep "[0-9\.]+" -o)
-LDFLAGS=-ldflags "-X main.Version=${VERSION} -s -w"
+LDFLAGS=-ldflags "-s -w"
 PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 # Package variables
@@ -15,7 +15,7 @@ DEB_DIR=$(BUILD_DIR)/deb
 DEB_PKG_DIR=$(DEB_DIR)/$(PKG_NAME)_$(PKG_VERSION)
 
 # Go parameters
-GOCMD=go
+GOCMD=GOAMD64=v3 go
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test

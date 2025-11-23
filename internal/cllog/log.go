@@ -6,7 +6,9 @@ import (
 	"io"
 	"log/syslog"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,12 @@ type SyslogLevelWriter struct {
 // InitLogger configure le logger global Zerolog
 // Setup initialise le logger avec la configuration
 func InitLogger(cfg clconfig.LoggerConfig, production bool) {
+	zerolog.CallerMarshalFunc = func(pc uintptr, file string, line int) string {
+		dir := path.Dir(file)
+		file = path.Join(path.Base(dir), path.Base(file))
+		return path.Base(file) + ":" + strconv.Itoa(line)
+	}
+
 	// Définir le niveau de log
 	level := parseLevel(cfg.Level)
 	zerolog.SetGlobalLevel(level)

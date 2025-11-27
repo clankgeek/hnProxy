@@ -3,11 +3,14 @@ package clfirewall
 import (
 	"fmt"
 	"hnproxy/internal/clconfig"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/oschwald/geoip2-golang/v2"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,6 +32,8 @@ type Firewall struct {
 	legitimateBots []string
 
 	rateLimiter *RateLimiter
+
+	GeoDB *geoip2.Reader
 }
 
 // RateLimiter pour limiter le nombre de requêtes par IP
@@ -41,6 +46,16 @@ type RateLimiter struct {
 
 // NewFirewall crée une nouvelle instance de Firewall
 func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
+	var geodb *geoip2.Reader
+	var err error
+
+	if config.GeolocationFiltering != nil && config.GeolocationFiltering.Enabled && config.GeolocationFiltering.DatabasePath != "" {
+		geodb, err = geoip2.Open(config.GeolocationFiltering.DatabasePath)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Erreur lors du chargement de la base de données GeoIP")
+		}
+	}
+
 	return &Firewall{
 		Config: config,
 		botUserAgents: []string{
@@ -135,6 +150,7 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 			limit:    100,         // 100 requêtes
 			window:   time.Minute, // par minute
 		},
+		GeoDB: geodb,
 	}
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
@@ -221,9 +237,52 @@ func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 		".cgi/",
 	}
 
+	if bd.Config.SuspiciousBehavior.WordpressRemover {
+		suspiciousPaths = append(suspiciousPaths, "/wp-login.php", "/wp-admin/", "/xmlrpc.php")
+	}
+
 	path := strings.ToLower(r.URL.Path)
 	for _, suspicious := range suspiciousPaths {
 		if strings.Contains(path, suspicious) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (bd *Firewall) IsGeolocationBlock(r *http.Request, clientIP string) bool {
+	if bd.GeoDB == nil {
+		return false
+	}
+
+	parsedIP, err := netip.ParseAddr(clientIP)
+	if err != nil {
+		return false
+	}
+
+	record, err := bd.GeoDB.Country(parsedIP)
+	if err != nil {
+		return false
+	}
+
+	countryCode := record.Country.ISOCode
+
+	for _, allowedCountry := range bd.Config.GeolocationFiltering.AllowedCountries {
+		if strings.EqualFold(countryCode, allowedCountry) {
+			return false
+		}
+	}
+
+	if bd.Config.GeolocationFiltering.NotAllowedActionBlock {
+		bd.blockIP(clientIP, 24*time.Hour)
+		return true
+	}
+
+	for _, blockedCountry := range bd.Config.GeolocationFiltering.DisallowedCountries {
+		if strings.EqualFold(countryCode, blockedCountry) {
+			log.Warn().Msg(fmt.Sprintf("🛡️	Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
+			bd.blockIP(clientIP, 24*time.Hour)
 			return true
 		}
 	}
@@ -292,23 +351,35 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
-// getClientIP extrait l'IP réelle du client
 func (bd *Firewall) GetClientIP(r *http.Request) string {
-	// Vérifier les headers de proxy
+	// 1. Cloudflare (priorité haute car très fiable)
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+
+	// 2. Header True-Client-IP (utilisé par Cloudflare Enterprise, Akamai)
+	if ip := r.Header.Get("True-Client-IP"); ip != "" {
+		return ip
+	}
+
+	// 3. X-Real-IP (Nginx, certains load balancers)
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return ip
 	}
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		// Prendre la première IP de la liste
-		parts := strings.Split(ip, ",")
-		return strings.TrimSpace(parts[0])
+
+	// 4. X-Forwarded-For (standard de facto)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Première IP = client original
+		if idx := strings.Index(xff, ","); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
 	}
 
-	// Sinon, utiliser RemoteAddr
-	ip := r.RemoteAddr
-	// Enlever le port si présent
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		return ip[:idx]
+	// 5. Fallback sur RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr // Pas de port, retourner tel quel
 	}
 	return ip
 }

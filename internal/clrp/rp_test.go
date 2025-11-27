@@ -39,7 +39,7 @@ func TestReverseProxyHandler_ServeHTTP(t *testing.T) {
 	clconfig.SetConfig(config, true, true)
 
 	// Create handler
-	firewall := clfirewall.NewFirewall(nil)
+	firewall := clfirewall.NewFirewall(config.Firewall)
 	handler := NewReverseProxyHandler(config, firewall)
 
 	tests := []struct {

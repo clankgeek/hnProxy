@@ -33,12 +33,21 @@ type Config struct {
 }
 
 type FirewallConfig struct {
-	Enabled            bool                      `yaml:"enabled"`
-	BlockMessage       string                    `yaml:"blockmessage"`
-	RateLimiter        *RateLimiterConfig        `yaml:"ratelimiter"`
-	Antibot            *AntiBotsConfig           `yaml:"antibot"`
-	PatternsFiltering  *PatternsFilteringConfig  `yaml:"patternsfiltering"`
-	SuspiciousBehavior *SuspiciousBehaviorConfig `yaml:"suspiciousbehavior"`
+	Enabled              bool                        `yaml:"enabled"`
+	BlockMessage         string                      `yaml:"blockmessage"`
+	RateLimiter          *RateLimiterConfig          `yaml:"ratelimiter"`
+	Antibot              *AntiBotsConfig             `yaml:"antibot"`
+	PatternsFiltering    *PatternsFilteringConfig    `yaml:"patternsfiltering"`
+	SuspiciousBehavior   *SuspiciousBehaviorConfig   `yaml:"suspiciousbehavior"`
+	GeolocationFiltering *GeolocationFilteringConfig `yaml:"geolocationfiltering,omitempty"`
+}
+
+type GeolocationFilteringConfig struct {
+	Enabled               bool     `yaml:"enabled"`
+	DatabasePath          string   `yaml:"dbpath,omitempty"`
+	NotAllowedActionBlock bool     `yaml:"notallowedactionblock,omitempty"`
+	AllowedCountries      []string `yaml:"allowedCountries,omitempty"`
+	DisallowedCountries   []string `yaml:"disallowedCountries,omitempty"`
 }
 
 type PatternsFilteringConfig struct {
@@ -46,7 +55,8 @@ type PatternsFilteringConfig struct {
 }
 
 type SuspiciousBehaviorConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled          bool `yaml:"enabled"`
+	WordpressRemover bool `yaml:"wordpressremover"`
 }
 
 type RateLimiterConfig struct {
@@ -140,6 +150,10 @@ func CreateExampleConfig(filename string, absolute bool) error {
 				Enabled: false,
 			},
 			SuspiciousBehavior: &SuspiciousBehaviorConfig{
+				Enabled:          false,
+				WordpressRemover: true,
+			},
+			GeolocationFiltering: &GeolocationFilteringConfig{
 				Enabled: false,
 			},
 		},
@@ -288,10 +302,11 @@ func ConvertConfig(yamlConfig *Config) (*ProxyConfig, error) {
 func NewConfig() *Config {
 	return &Config{
 		Firewall: &FirewallConfig{
-			RateLimiter:        &RateLimiterConfig{},
-			Antibot:            &AntiBotsConfig{},
-			PatternsFiltering:  &PatternsFilteringConfig{},
-			SuspiciousBehavior: &SuspiciousBehaviorConfig{},
+			RateLimiter:          &RateLimiterConfig{},
+			Antibot:              &AntiBotsConfig{},
+			PatternsFiltering:    &PatternsFilteringConfig{},
+			SuspiciousBehavior:   &SuspiciousBehaviorConfig{},
+			GeolocationFiltering: &GeolocationFilteringConfig{},
 		},
 		TLS: &TLSConfig{
 			ACME: &ACMEconfig{},
@@ -302,10 +317,11 @@ func NewConfig() *Config {
 func SetConfig(config *ProxyConfig, firewall bool, tls bool) {
 	if firewall {
 		config.Firewall = &FirewallConfig{
-			RateLimiter:        &RateLimiterConfig{},
-			Antibot:            &AntiBotsConfig{},
-			PatternsFiltering:  &PatternsFilteringConfig{},
-			SuspiciousBehavior: &SuspiciousBehaviorConfig{},
+			RateLimiter:          &RateLimiterConfig{},
+			Antibot:              &AntiBotsConfig{},
+			PatternsFiltering:    &PatternsFilteringConfig{},
+			SuspiciousBehavior:   &SuspiciousBehaviorConfig{},
+			GeolocationFiltering: &GeolocationFilteringConfig{},
 		}
 	}
 	if tls {

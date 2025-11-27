@@ -139,6 +139,16 @@ firewall:
         enabled: false
     suspiciousbehavior:
         enabled: false
+        wordpressremover: true # check des patterns wordpress
+    geolocationfiltering:
+        enabled: true
+        dbpath: ./GeoLite2-Country.mmdb
+        notallowedactionblock: false # true si un pays n'est pas listé dans allowed, il sera bloqué
+        allowedCountries:
+            - FR
+        disallowedCountries:
+            - CN
+            - RU
 ```
 
 - blockmessage: choix du type de bloquage

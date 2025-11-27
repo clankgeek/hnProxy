@@ -42,6 +42,13 @@ func RunServer(server *Server) error {
 	}
 }
 
+func (s *Server) Close() {
+	// Fermer la base de données GeoIP si elle est ouverte
+	if s.handler.Firewall != nil && s.handler.Firewall.GeoDB != nil {
+		s.handler.Firewall.GeoDB.Close()
+	}
+}
+
 // StartHTTPServer starts the HTTP-only server
 func (s *Server) StartHTTPServer() error {
 	LogPrintf("Serveur HTTP démarré sur %s", s.config.ListenAddr)
@@ -155,6 +162,7 @@ func (s *Server) DisplayConfiguration(configFile string) {
 		withRateLimiter := s.config.Firewall.RateLimiter.Enabled
 		withPatternFiltering := s.config.Firewall.PatternsFiltering.Enabled
 		withSuspiciousBehavior := s.config.Firewall.SuspiciousBehavior.Enabled
+		withGeolocationFiltering := s.config.Firewall.GeolocationFiltering.Enabled
 
 		if withAntibot || withRateLimiter || withPatternFiltering || withSuspiciousBehavior {
 			firewall = true
@@ -186,6 +194,18 @@ func (s *Server) DisplayConfiguration(configFile string) {
 			}
 			if withSuspiciousBehavior {
 				LogPrintf("Filtrage sur action suspecte activé")
+			}
+			if withGeolocationFiltering {
+				LogPrintf("Filtrage géolocalisation activé")
+				if s.config.Firewall.GeolocationFiltering.NotAllowedActionBlock {
+					LogPrintf("  • Action sur pays non autorisé : blocage")
+				}
+				for _, country := range s.config.Firewall.GeolocationFiltering.AllowedCountries {
+					LogPrintf("  • Pays autorisé: %s", country)
+				}
+				for _, country := range s.config.Firewall.GeolocationFiltering.DisallowedCountries {
+					LogPrintf("  • Pays bloqué: %s", country)
+				}
 			}
 		}
 

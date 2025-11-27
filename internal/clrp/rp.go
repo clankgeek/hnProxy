@@ -36,6 +36,9 @@ func (rph *ReverseProxyHandler) FirewallRequest(r *http.Request) error {
 		if rph.Firewall.IsIPBlocked(clientIp) {
 			return fmt.Errorf("")
 		}
+		if rph.Firewall.IsGeolocationBlock(r, clientIp) {
+			return fmt.Errorf("🚫 Requette rejetée par le firewall, module géolocalisation")
+		}
 		if rph.Firewall.IsLimiter(r, clientIp) {
 			return fmt.Errorf("🚫 Requette rejetée par le firewall, module ratelimiter")
 		}

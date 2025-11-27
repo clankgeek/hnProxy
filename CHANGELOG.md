@@ -4,6 +4,8 @@ Toutes les modifications notables de ce projet seront documentées dans ce fichi
 
 ## [1.2.0] - dev
 - choix du blockmessage, avec 403, 404, 418 ou slowfake
+- filtrage des patterns wordpress si on ne l'utilise pas
+- filtrage des pays via geoloc en liste authorisé ou non authorisé
 
 ## [1.1.0] - 2025-10-26
 - Controle du host lors de la redirection http vers https

@@ -71,6 +71,8 @@ func main() {
 	server := clserver.NewServer(config)
 	server.DisplayConfiguration(configFile)
 
+	defer server.Close()
+
 	// Start server
 	if err := clserver.RunServer(server); err != nil {
 		log.Fatal().Msg(fmt.Sprintf("❌ Erreur serveur: %v", err))

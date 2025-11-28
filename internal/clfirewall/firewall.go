@@ -59,76 +59,87 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 	return &Firewall{
 		Config: config,
 		botUserAgents: []string{
-			// Bots de scraping courants
-			"python-requests",
-			"python-urllib",
-			"go-http-client",
-			"scrapy",
-			"wget",
-			"curl",
-			"libwww-perl",
-			"PHP",
-			"java",
-			"ruby",
-
-			// Bots malveillants connus
+			// Scanners de vulnérabilités / Outils d'attaque
 			"masscan",
 			"nmap",
 			"nikto",
 			"sqlmap",
 			"havij",
 			"acunetix",
-			"Sogou",
-
-			// Bots commerciaux
+			"nessus",
+			"openvas",
+			// Scrapers
+			"scrapy",
+			"mechanize",
+			// Clients HTTP génériques (souvent scraping)
+			"python-requests",
+			"python-urllib",
+			"go-http-client",
+			"wget",
+			"curl",
+			"libwww-perl",
+			"PHP",
+			"java",
+			"ruby",
+			"httpx",
+			"axios",
+			// Bots SEO/commerciaux
 			"ahrefsbot",
 			"semrushbot",
 			"dotbot",
 			"mj12bot",
 			"blexbot",
-			"yandexbot",
-			"baiduspider",
-			"petalbot",
-			"aspiegelbot",
+			"dataforseobot",
 			"zoominfobot",
 			"barkrowler",
-			"dataforseobot",
 		},
 		legitimateBots: []string{
 			// Moteurs de recherche majeurs
-			"Google",
 			"googlebot",
-			"googlebotvideos",
 			"googlebot-image",
+			"googlebot-video",
 			"googlebot-news",
+			"google-inspectiontool",
 			"bingbot",
 			"slurp", // Yahoo
 			"duckduckbot",
-
+			"applebot", // Siri/Spotlight
+			"yeti",     // Naver (Corée)
+			// Moteurs de recherche secondaires
+			"yandexbot",   // Russie
+			"baiduspider", // Chine
+			"sogou",       // Chine
+			"petalbot",    // Huawei
+			"aspiegelbot", // Huawei Ask
 			// Réseaux sociaux
 			"facebookexternalhit",
 			"facebookcatalog",
 			"twitterbot",
 			"linkedinbot",
 			"whatsapp",
-			"telegram",
+			"telegrambot",
 			"discordbot",
 			"slackbot",
-
-			// Services de monitoring et SEO légitimes
+			"pinterestbot",
+			"redditbot",
+			"quora link preview",
+			// Monitoring et services
 			"uptimerobot",
 			"pingdom",
 			"newrelic",
 			"datadog",
-
-			// Autres services légitimes
-			"applebot", // Siri et Spotlight
-			"pinterest",
-			"quora",
-			"redditbot",
-
-			// RSS
+			"site24x7",
+			"statuscake",
+			// Lecteurs RSS/Feed
 			"feedly",
+			"feedbin",
+			"inoreader",
+			"newsblur",
+			// Autres services utiles
+			"gptbot",          // OpenAI
+			"claudebot",       // Anthropic
+			"archive.org_bot", // Internet Archive
+			"w3c_validator",
 		},
 		suspiciousPatterns: []string{
 			"bot",

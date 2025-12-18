@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oschwald/geoip2-golang/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,7 +20,7 @@ type Firewall struct {
 	Config *clconfig.FirewallConfig
 
 	// Liste des User-Agents de bots connus
-	botUserAgents []string
+	botUserAgents map[string]bool
 
 	// Liste des IP bloquées
 	blockedIPs map[string]time.Time
@@ -29,11 +30,16 @@ type Firewall struct {
 	suspiciousPatterns []string
 
 	// Liste des bots légitimes
-	legitimateBots []string
+	legitimateBots map[string]bool
+
+	// Liste des bots IA
+	iaBots map[string]bool
 
 	rateLimiter *RateLimiter
 
 	GeoDB *geoip2.Reader
+
+	Redis *redis.Client
 }
 
 // RateLimiter pour limiter le nombre de requêtes par IP
@@ -47,6 +53,7 @@ type RateLimiter struct {
 // NewFirewall crée une nouvelle instance de Firewall
 func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 	var geodb *geoip2.Reader
+	var redisClient *redis.Client
 	var err error
 
 	if config.GeolocationFiltering != nil && config.GeolocationFiltering.Enabled && config.GeolocationFiltering.DatabasePath != "" {
@@ -56,91 +63,18 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 		}
 	}
 
-	return &Firewall{
-		Config: config,
-		botUserAgents: []string{
-			// Scanners de vulnérabilités / Outils d'attaque
-			"masscan",
-			"nmap",
-			"nikto",
-			"sqlmap",
-			"havij",
-			"acunetix",
-			"nessus",
-			"openvas",
-			// Scrapers
-			"scrapy",
-			"mechanize",
-			// Clients HTTP génériques (souvent scraping)
-			"python-requests",
-			"python-urllib",
-			"go-http-client",
-			"wget",
-			"curl",
-			"libwww-perl",
-			"PHP",
-			"java",
-			"ruby",
-			"httpx",
-			"axios",
-			// Bots SEO/commerciaux
-			"ahrefsbot",
-			"semrushbot",
-			"dotbot",
-			"mj12bot",
-			"blexbot",
-			"dataforseobot",
-			"zoominfobot",
-			"barkrowler",
-		},
-		legitimateBots: []string{
-			// Moteurs de recherche majeurs
-			"googlebot",
-			"googlebot-image",
-			"googlebot-video",
-			"googlebot-news",
-			"google-inspectiontool",
-			"bingbot",
-			"slurp", // Yahoo
-			"duckduckbot",
-			"applebot", // Siri/Spotlight
-			"yeti",     // Naver (Corée)
-			// Moteurs de recherche secondaires
-			"yandexbot",   // Russie
-			"baiduspider", // Chine
-			"sogou",       // Chine
-			"petalbot",    // Huawei
-			"aspiegelbot", // Huawei Ask
-			// Réseaux sociaux
-			"facebookexternalhit",
-			"facebookcatalog",
-			"twitterbot",
-			"linkedinbot",
-			"whatsapp",
-			"telegrambot",
-			"discordbot",
-			"slackbot",
-			"pinterestbot",
-			"redditbot",
-			"quora link preview",
-			// Monitoring et services
-			"uptimerobot",
-			"pingdom",
-			"newrelic",
-			"datadog",
-			"site24x7",
-			"statuscake",
-			// Lecteurs RSS/Feed
-			"feedly",
-			"feedbin",
-			"inoreader",
-			"newsblur",
-			// Autres services utiles
-			"gptbot",          // OpenAI
-			"claudebot",       // Anthropic
-			"archive.org_bot", // Internet Archive
-			"w3c_validator",
-		},
+	if config.Redis != nil && config.Redis.Addr != "" {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr: config.Redis.Addr,
+			DB:   config.Redis.Db,
+		})
+	}
+
+	fw := &Firewall{
+		Config:         config,
+		legitimateBots: make(map[string]bool),
+		iaBots:         make(map[string]bool),
+		botUserAgents:  make(map[string]bool),
 		suspiciousPatterns: []string{
 			"bot",
 			"crawler",
@@ -162,7 +96,22 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 			window:   time.Minute, // par minute
 		},
 		GeoDB: geodb,
+		Redis: redisClient,
 	}
+
+	for _, ua := range botUserAgents {
+		fw.botUserAgents[ua] = true
+	}
+
+	for _, bot := range legitimateBots {
+		fw.legitimateBots[bot] = true
+	}
+
+	for _, iaBot := range iaBots {
+		fw.iaBots[iaBot] = true
+	}
+
+	return fw
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
 	if bd.Config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
@@ -181,11 +130,22 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	if bd.Config.Antibot.Enabled {
 		// Vérifier les bots légitimes SI on veut les bloquer
 		if bd.Config.Antibot.BlockLegitimeBots {
-			for _, bot := range bd.legitimateBots {
+			for bot := range bd.legitimateBots {
 				if strings.Contains(userAgent, bot) {
 					log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot légitime bloqué: %s depuis %s", bot, clientIP))
 					// Blocage plus court pour les bots légitimes (ils reviendront)
 					bd.blockIP(clientIP, 30*time.Minute)
+					return true
+				}
+			}
+		}
+
+		if bd.Config.Antibot.BlockIABots {
+			for iaBot := range bd.iaBots {
+				if strings.Contains(userAgent, iaBot) {
+					log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot IA bloqué: %s depuis %s", iaBot, clientIP))
+					// Blocage plus long pour les bots IA (moins légitimes)
+					bd.blockIP(clientIP, 1*time.Hour)
 					return true
 				}
 			}
@@ -199,7 +159,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 		}
 
 		// Vérifier les User-Agents de bots connus (malveillants)
-		for _, botUA := range bd.botUserAgents {
+		for botUA := range bd.botUserAgents {
 			if strings.Contains(userAgent, botUA) {
 				log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot malveillant détecté: %s depuis %s", botUA, clientIP))
 				bd.blockIP(clientIP, 24*time.Hour)
@@ -246,6 +206,8 @@ func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 		"/.aws/",
 		"/cgi-bin/",
 		".cgi/",
+		"/wp-good.php",       // backdoors
+		"/autoload_classmap", // backdoors
 	}
 
 	if bd.Config.SuspiciousBehavior.WordpressRemover {
@@ -262,6 +224,14 @@ func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 	return false
 }
 
+func (bd *Firewall) setRedisValue(r *http.Request, ipKey string, value string) bool {
+	if bd.Redis == nil {
+		return value == "true"
+	}
+	bd.Redis.Set(r.Context(), ipKey, value, 1*time.Hour)
+	return value == "true"
+}
+
 func (bd *Firewall) IsGeolocationBlock(r *http.Request, clientIP string) bool {
 	if bd.GeoDB == nil {
 		return false
@@ -271,39 +241,48 @@ func (bd *Firewall) IsGeolocationBlock(r *http.Request, clientIP string) bool {
 	if err != nil {
 		return false
 	}
+	ipKey := fmt.Sprintf("geoloc:ip:%s", parsedIP)
+
+	if bd.Redis != nil {
+		val := bd.Redis.Get(r.Context(), ipKey).Val()
+		if val != "" {
+			return val == "true"
+		}
+	}
 
 	record, err := bd.GeoDB.Country(parsedIP)
 	if err != nil {
-		return false
+		return bd.setRedisValue(r, ipKey, "false")
 	}
 
 	countryCode := record.Country.ISOCode
 
 	for _, allowedCountry := range bd.Config.GeolocationFiltering.AllowedCountries {
 		if strings.EqualFold(countryCode, allowedCountry) {
-			return false
+			return bd.setRedisValue(r, ipKey, "false")
 		}
 	}
 
 	if bd.Config.GeolocationFiltering.NotAllowedActionBlock {
+		log.Warn().Msg(fmt.Sprintf("🛡️	Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
 		bd.blockIP(clientIP, 24*time.Hour)
-		return true
+		return bd.setRedisValue(r, ipKey, "true")
 	}
 
 	for _, blockedCountry := range bd.Config.GeolocationFiltering.DisallowedCountries {
 		if strings.EqualFold(countryCode, blockedCountry) {
 			log.Warn().Msg(fmt.Sprintf("🛡️	Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
 			bd.blockIP(clientIP, 24*time.Hour)
-			return true
+			return bd.setRedisValue(r, ipKey, "true")
 		}
 	}
 
-	return false
+	return bd.setRedisValue(r, ipKey, "false")
 }
 
 // isLegitimateBot vérifie si c'est un bot légitime (méthode interne)
 func (bd *Firewall) isLegitimateBot(userAgent string) bool {
-	for _, bot := range bd.legitimateBots {
+	for bot := range bd.legitimateBots {
 		if strings.Contains(userAgent, bot) {
 			return true
 		}

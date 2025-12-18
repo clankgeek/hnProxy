@@ -29,6 +29,9 @@ production: true # mode production, n'affiche pas les logs en console
 listen: "0.0.0.0:8080"
 firewall:
     enabled: true
+    redis: # utilise un cache redis pour stocker les données du firewall
+      addr: 127.0.0.1:6379 # vide pour un memcache interne
+      db: 0
     blockmessage: forbidden # forbidden, notfound, teapot, slowfake
     ratelimiter:
         enabled: true
@@ -36,6 +39,7 @@ firewall:
     antibot:
         enabled: true
         blockLegitimeBots: false
+        blockIABots: true
     patternsfiltering:
         enabled: false
     suspiciousbehavior:
@@ -128,6 +132,9 @@ make deb
 ```yaml
 firewall:
     enabled: true
+    redis: # utilise un cache redis pour stocker les données du firewall
+      addr: 127.0.0.1:6379 # vide pour un memcache interne
+      db: 0
     blockmessage: forbidden
     ratelimiter:
         enabled: true
@@ -135,6 +142,7 @@ firewall:
     antibot:
         enabled: true
         blockLegitimeBots: false
+        blockIABots: true
     patternsfiltering:
         enabled: false
     suspiciousbehavior:
@@ -158,7 +166,7 @@ firewall:
   - slowfake, retourn un code type 200 et affiche des paragraphes de lorem très lentement 
 
 - Rate limiter en requette par minute
-- Antibot avec possibilité de laisser passer les good bots
+- Antibot avec possibilité de laisser passer les good bots, et bloquer les bots IA (ChatGPT, Bard, etc)
 
 ### ACME/Let's Encrypt (Recommandé)
 

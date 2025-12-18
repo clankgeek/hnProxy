@@ -34,12 +34,18 @@ type Config struct {
 
 type FirewallConfig struct {
 	Enabled              bool                        `yaml:"enabled"`
+	Redis                *RedisConfig                `yaml:"redis,omitempty"`
 	BlockMessage         string                      `yaml:"blockmessage"`
 	RateLimiter          *RateLimiterConfig          `yaml:"ratelimiter"`
 	Antibot              *AntiBotsConfig             `yaml:"antibot"`
 	PatternsFiltering    *PatternsFilteringConfig    `yaml:"patternsfiltering"`
 	SuspiciousBehavior   *SuspiciousBehaviorConfig   `yaml:"suspiciousbehavior"`
 	GeolocationFiltering *GeolocationFilteringConfig `yaml:"geolocationfiltering,omitempty"`
+}
+
+type RedisConfig struct {
+	Addr string `yaml:"addr"`
+	Db   int    `yaml:"db"`
 }
 
 type GeolocationFilteringConfig struct {
@@ -67,6 +73,7 @@ type RateLimiterConfig struct {
 type AntiBotsConfig struct {
 	Enabled           bool `yaml:"enabled"`
 	BlockLegitimeBots bool `yaml:"blockLegitimeBots"`
+	BlockIABots       bool `yaml:"blockIABots"`
 }
 
 type TLSConfig struct {
@@ -137,6 +144,7 @@ func CreateExampleConfig(filename string, absolute bool) error {
 		Listen: "0.0.0.0:8080",
 		Firewall: &FirewallConfig{
 			Enabled:      true,
+			Redis:        &RedisConfig{},
 			BlockMessage: "forbidden",
 			RateLimiter: &RateLimiterConfig{
 				Enabled: false,
@@ -145,6 +153,7 @@ func CreateExampleConfig(filename string, absolute bool) error {
 			Antibot: &AntiBotsConfig{
 				Enabled:           true,
 				BlockLegitimeBots: false,
+				BlockIABots:       false,
 			},
 			PatternsFiltering: &PatternsFilteringConfig{
 				Enabled: false,
@@ -257,7 +266,6 @@ func ValidateConfig(config *ProxyConfig) error {
 			return fmt.Errorf("certificats TLS manquants (cert_file ou key_file)")
 		}
 	}
-
 	return nil
 }
 
@@ -302,6 +310,7 @@ func ConvertConfig(yamlConfig *Config) (*ProxyConfig, error) {
 func NewConfig() *Config {
 	return &Config{
 		Firewall: &FirewallConfig{
+			Redis:                &RedisConfig{},
 			RateLimiter:          &RateLimiterConfig{},
 			Antibot:              &AntiBotsConfig{},
 			PatternsFiltering:    &PatternsFilteringConfig{},
@@ -317,6 +326,7 @@ func NewConfig() *Config {
 func SetConfig(config *ProxyConfig, firewall bool, tls bool) {
 	if firewall {
 		config.Firewall = &FirewallConfig{
+			Redis:                &RedisConfig{},
 			RateLimiter:          &RateLimiterConfig{},
 			Antibot:              &AntiBotsConfig{},
 			PatternsFiltering:    &PatternsFilteringConfig{},

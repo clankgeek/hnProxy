@@ -165,7 +165,7 @@ firewall:
   - teapot, retourne un code type 418 et affiche une théière en plein écran au format svg
   - slowfake, retourn un code type 200 et affiche des paragraphes de lorem très lentement 
 
-- Rate limiter en requette par minute
+- Rate limiter en requêtes par minute
 - Antibot avec possibilité de laisser passer les good bots, et bloquer les bots IA (ChatGPT, Bard, etc)
 
 ### ACME/Let's Encrypt (Recommandé)

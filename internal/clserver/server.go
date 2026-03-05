@@ -178,7 +178,7 @@ func (s *Server) DisplayConfiguration(configFile string) {
 				LogPrintf("  • Block message mode : 403 forbidden")
 			}
 			if withRateLimiter {
-				LogPrintf("  • Rate Limiter activé à %d requettes par minute", s.config.Firewall.RateLimiter.Limit)
+				LogPrintf("  • Rate Limiter activé à %d requêtes par minute", s.config.Firewall.RateLimiter.Limit)
 			}
 			if withAntibot {
 				bot := "  • 🤖 Antibot activé "

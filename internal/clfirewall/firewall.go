@@ -115,7 +115,7 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 }
 func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
 	if bd.Config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
-		log.Warn().Msg(fmt.Sprintf("🛡️	Rate limit dépassé pour %s", clientIP))
+		log.Warn().Msg(fmt.Sprintf("🛡️ Rate limit dépassé pour %s", clientIP))
 		bd.blockIP(clientIP, 15*time.Minute)
 		return true
 	}
@@ -264,14 +264,14 @@ func (bd *Firewall) IsGeolocationBlock(r *http.Request, clientIP string) bool {
 	}
 
 	if bd.Config.GeolocationFiltering.NotAllowedActionBlock {
-		log.Warn().Msg(fmt.Sprintf("🛡️	Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
+		log.Warn().Msg(fmt.Sprintf("🛡️ Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
 		bd.blockIP(clientIP, 24*time.Hour)
 		return bd.setRedisValue(r, ipKey, "true")
 	}
 
 	for _, blockedCountry := range bd.Config.GeolocationFiltering.DisallowedCountries {
 		if strings.EqualFold(countryCode, blockedCountry) {
-			log.Warn().Msg(fmt.Sprintf("🛡️	Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
+			log.Warn().Msg(fmt.Sprintf("🛡️ Requête bloquée depuis le pays '%s' pour l'IP '%s'", countryCode, clientIP))
 			bd.blockIP(clientIP, 24*time.Hour)
 			return bd.setRedisValue(r, ipKey, "true")
 		}
@@ -295,7 +295,7 @@ func (bd *Firewall) blockIP(ip string, duration time.Duration) {
 	bd.mu.Lock()
 	defer bd.mu.Unlock()
 	bd.blockedIPs[ip] = time.Now().Add(duration)
-	log.Warn().Msg(fmt.Sprintf("🛡️	Ip '%s' bannie durant '%s'", ip, duration))
+	log.Warn().Msg(fmt.Sprintf("🛡️ Ip '%s' bannie durant '%s'", ip, duration))
 }
 
 // isIPBlocked vérifie si une IP est bloquée

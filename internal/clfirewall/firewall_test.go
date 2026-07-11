@@ -4,6 +4,7 @@ import (
 	"hnproxy/internal/clconfig"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -309,18 +310,17 @@ func TestIsLimiter(t *testing.T) {
 	fw.rateLimiter.limit = 2
 	fw.rateLimiter.window = 100 * time.Millisecond
 
-	req := httptest.NewRequest("GET", "/", nil)
 	ip := "192.168.1.1"
 
 	// Les premières requêtes ne devraient pas déclencher le limiter
 	for i := 0; i < 2; i++ {
-		if fw.IsLimiter(req, ip) {
+		if fw.IsLimiter(ip) {
 			t.Errorf("La requête %d ne devrait pas être limitée", i+1)
 		}
 	}
 
 	// La 3ème requête devrait déclencher le limiter
-	if !fw.IsLimiter(req, ip) {
+	if !fw.IsLimiter(ip) {
 		t.Error("La 3ème requête devrait être limitée")
 	}
 
@@ -562,5 +562,191 @@ func BenchmarkRateLimiter(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rl.Allow("192.168.1.1")
+	}
+}
+
+// TestIsIPInBlocklist teste la vérification de la blocklist IP
+func TestIsIPInBlocklist(t *testing.T) {
+	// Disabled config: should always return false
+	fwDisabled := NewFirewall(&clconfig.FirewallConfig{
+		Enabled:            true,
+		RateLimiter:        &clconfig.RateLimiterConfig{},
+		Antibot:            &clconfig.AntiBotsConfig{},
+		PatternsFiltering:  &clconfig.PatternsFilteringConfig{},
+		SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{},
+		IPBlockListConfig:  &clconfig.IPBlockListConfig{Enabled: false},
+	})
+
+	if fwDisabled.IsIPInBlocklist("1.2.3.4") {
+		t.Error("IsIPInBlocklist should return false when module is disabled")
+	}
+
+	// Enabled config with blocked IP
+	fwEnabled := NewFirewall(&clconfig.FirewallConfig{
+		Enabled:            true,
+		RateLimiter:        &clconfig.RateLimiterConfig{},
+		Antibot:            &clconfig.AntiBotsConfig{},
+		PatternsFiltering:  &clconfig.PatternsFilteringConfig{},
+		SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{},
+		IPBlockListConfig:  &clconfig.IPBlockListConfig{Enabled: true},
+	})
+	fwEnabled.IPBlockList["5.6.7.8"] = struct{}{}
+
+	if !fwEnabled.IsIPInBlocklist("5.6.7.8") {
+		t.Error("IsIPInBlocklist should return true for blocked IP")
+	}
+
+	if fwEnabled.IsIPInBlocklist("9.9.9.9") {
+		t.Error("IsIPInBlocklist should return false for non-blocked IP")
+	}
+}
+
+// TestLoadBlocklist teste le chargement d'une blocklist depuis un fichier
+func TestLoadBlocklist(t *testing.T) {
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, false, false))
+
+	// Create a temp blocklist file
+	tmpFile, err := os.CreateTemp("", "blocklist-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := "# This is a comment\n1.2.3.4\n5.6.7.8\n\n  9.9.9.9  \n"
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	fw.LoadBlocklist(tmpFile.Name())
+
+	if len(fw.IPBlockList) != 3 {
+		t.Errorf("Expected 3 IPs in blocklist, got %d", len(fw.IPBlockList))
+	}
+
+	for _, ip := range []string{"1.2.3.4", "5.6.7.8", "9.9.9.9"} {
+		if _, ok := fw.IPBlockList[ip]; !ok {
+			t.Errorf("IP %s should be in blocklist", ip)
+		}
+	}
+}
+
+// TestLoadBlocklist_InvalidPath tests error handling for missing file
+func TestLoadBlocklist_InvalidPath(t *testing.T) {
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, false, false))
+	// Should not panic, just log error
+	fw.LoadBlocklist("/nonexistent/path/blocklist.txt")
+	if len(fw.IPBlockList) != 0 {
+		t.Error("Blocklist should be empty after loading from invalid path")
+	}
+}
+
+// TestHasSuspiciousBehavior_SuspiciousPaths tests detection of sensitive file access
+func TestHasSuspiciousBehavior_SuspiciousPaths(t *testing.T) {
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, false, true))
+
+	tests := []struct {
+		path      string
+		suspected bool
+	}{
+		{"/normal/page", false},
+		{"/.env", true},
+		{"/.git/config", true},
+		{"/backup.sql", true},
+		{"/.aws/credentials", true},
+		{"/cgi-bin/test.cgi", true},
+		{"/wp-good.php", true},
+		{"/autoload_classmap.php", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.path, nil)
+			result := fw.hasSuspiciousBehavior(req)
+			if result != tt.suspected {
+				t.Errorf("hasSuspiciousBehavior(%q) = %v, want %v", tt.path, result, tt.suspected)
+			}
+		})
+	}
+}
+
+// TestHasSuspiciousBehavior_WordPress tests WordPress path detection
+func TestHasSuspiciousBehavior_WordPress(t *testing.T) {
+	fw := NewFirewall(&clconfig.FirewallConfig{
+		Enabled:           true,
+		RateLimiter:       &clconfig.RateLimiterConfig{},
+		Antibot:           &clconfig.AntiBotsConfig{},
+		PatternsFiltering: &clconfig.PatternsFilteringConfig{},
+		SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{
+			Enabled:          true,
+			WordpressRemover: true,
+		},
+	})
+
+	wpPaths := []string{"/wp-login.php", "/wp-admin/", "/xmlrpc.php"}
+	for _, path := range wpPaths {
+		req := httptest.NewRequest("GET", path, nil)
+		if !fw.hasSuspiciousBehavior(req) {
+			t.Errorf("hasSuspiciousBehavior(%q) should return true with WordpressRemover enabled", path)
+		}
+	}
+}
+
+// TestGetClientIP_CloudflareHeaders tests Cloudflare and True-Client-IP headers
+func TestGetClientIP_CloudflareHeaders(t *testing.T) {
+	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, false, false))
+
+	tests := []struct {
+		name     string
+		header   string
+		value    string
+		expected string
+	}{
+		{"CF-Connecting-IP", "CF-Connecting-IP", "203.0.113.1", "203.0.113.1"},
+		{"True-Client-IP", "True-Client-IP", "203.0.113.2", "203.0.113.2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Header.Set(tt.header, tt.value)
+			req.RemoteAddr = "192.168.1.1:12345"
+
+			ip := fw.GetClientIP(req)
+			if ip != tt.expected {
+				t.Errorf("GetClientIP() = %q, want %q", ip, tt.expected)
+			}
+		})
+	}
+}
+
+// TestNewFirewall_WithIPBlocklistPath tests firewall creation with local blocklist
+func TestNewFirewall_WithIPBlocklistPath(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "blocklist-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.WriteString("10.0.0.1\n10.0.0.2\n")
+	tmpFile.Close()
+
+	config := &clconfig.FirewallConfig{
+		Enabled:            true,
+		RateLimiter:        &clconfig.RateLimiterConfig{},
+		Antibot:            &clconfig.AntiBotsConfig{},
+		PatternsFiltering:  &clconfig.PatternsFilteringConfig{},
+		SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{},
+		IPBlockListConfig: &clconfig.IPBlockListConfig{
+			Enabled:      true,
+			DatabasePath: tmpFile.Name(),
+		},
+	}
+
+	fw := NewFirewall(config)
+	if fw == nil {
+		t.Fatal("NewFirewall returned nil")
+	}
+	if len(fw.IPBlockList) != 2 {
+		t.Errorf("Expected 2 IPs in blocklist, got %d", len(fw.IPBlockList))
 	}
 }

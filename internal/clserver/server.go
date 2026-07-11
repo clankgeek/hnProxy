@@ -163,8 +163,9 @@ func (s *Server) DisplayConfiguration(configFile string) {
 		withPatternFiltering := s.config.Firewall.PatternsFiltering.Enabled
 		withSuspiciousBehavior := s.config.Firewall.SuspiciousBehavior.Enabled
 		withGeolocationFiltering := s.config.Firewall.GeolocationFiltering.Enabled
+		withBlocklist := s.config.Firewall.IPBlockListConfig.Enabled
 
-		if withAntibot || withRateLimiter || withPatternFiltering || withSuspiciousBehavior {
+		if withAntibot || withRateLimiter || withPatternFiltering || withSuspiciousBehavior || withBlocklist {
 			firewall = true
 			LogPrintf("🛡️ Firewall activé")
 			switch s.config.Firewall.BlockMessage {
@@ -176,6 +177,14 @@ func (s *Server) DisplayConfiguration(configFile string) {
 				LogPrintf("  • Block message mode : 404 not found")
 			default:
 				LogPrintf("  • Block message mode : 403 forbidden")
+			}
+			if withBlocklist {
+				LogPrintf("  • IP Blocklist activée")
+				if s.config.Firewall.IPBlockListConfig.DatabaseURL != "" {
+					LogPrintf("    - Source: %s", s.config.Firewall.IPBlockListConfig.DatabaseURL)
+				} else {
+					LogPrintf("    - Source: %s", s.config.Firewall.IPBlockListConfig.DatabasePath)
+				}
 			}
 			if withRateLimiter {
 				LogPrintf("  • Rate Limiter activé à %d requêtes par minute", s.config.Firewall.RateLimiter.Limit)

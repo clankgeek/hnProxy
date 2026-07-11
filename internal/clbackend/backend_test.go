@@ -200,3 +200,61 @@ func mustParseURL(rawURL string) *url.URL {
 	}
 	return u
 }
+
+func TestNewBackendTarget(t *testing.T) {
+	urls := []*url.URL{
+		mustParseURL("http://localhost:3001"),
+		mustParseURL("http://localhost:3002"),
+	}
+
+	bt := NewBackendTarget(urls)
+
+	if bt == nil {
+		t.Fatal("NewBackendTarget returned nil")
+	}
+	if bt.current != 0 {
+		t.Errorf("current = %d, want 0", bt.current)
+	}
+	if len(bt.URLs) != 2 {
+		t.Errorf("len(URLs) = %d, want 2", len(bt.URLs))
+	}
+
+	// Verify round-robin starts from index 0
+	first := bt.NextURL()
+	if first.String() != "http://localhost:3001" {
+		t.Errorf("first URL = %s, want http://localhost:3001", first.String())
+	}
+}
+
+func TestNewBackendTarget_Empty(t *testing.T) {
+	bt := NewBackendTarget([]*url.URL{})
+	if bt == nil {
+		t.Fatal("NewBackendTarget returned nil")
+	}
+	if bt.NextURL() != nil {
+		t.Error("NextURL on empty target should return nil")
+	}
+}
+
+func TestMustParseURL_Valid(t *testing.T) {
+	u := MustParseURL("http://localhost:8080/path?q=1")
+	if u == nil {
+		t.Fatal("MustParseURL returned nil for valid URL")
+	}
+	if u.Host != "localhost:8080" {
+		t.Errorf("Host = %s, want localhost:8080", u.Host)
+	}
+	if u.Path != "/path" {
+		t.Errorf("Path = %s, want /path", u.Path)
+	}
+}
+
+func TestMustParseURL_Panic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("MustParseURL should panic on invalid URL")
+		}
+	}()
+	// This URL has an invalid scheme that causes url.Parse to return an error
+	MustParseURL("://invalid")
+}

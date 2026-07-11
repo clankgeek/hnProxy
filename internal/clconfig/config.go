@@ -41,11 +41,18 @@ type FirewallConfig struct {
 	PatternsFiltering    *PatternsFilteringConfig    `yaml:"patternsfiltering"`
 	SuspiciousBehavior   *SuspiciousBehaviorConfig   `yaml:"suspiciousbehavior"`
 	GeolocationFiltering *GeolocationFilteringConfig `yaml:"geolocationfiltering,omitempty"`
+	IPBlockListConfig    *IPBlockListConfig          `yaml:"ipblocklist,omitempty"`
 }
 
 type RedisConfig struct {
 	Addr string `yaml:"addr"`
 	Db   int    `yaml:"db"`
+}
+
+type IPBlockListConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	DatabasePath string `yaml:"dbpath,omitempty"`
+	DatabaseURL  string `yaml:"databaseurl,omitempty"`
 }
 
 type GeolocationFilteringConfig struct {
@@ -163,6 +170,9 @@ func CreateExampleConfig(filename string, absolute bool) error {
 				WordpressRemover: true,
 			},
 			GeolocationFiltering: &GeolocationFilteringConfig{
+				Enabled: false,
+			},
+			IPBlockListConfig: &IPBlockListConfig{
 				Enabled: false,
 			},
 		},
@@ -316,6 +326,7 @@ func NewConfig() *Config {
 			PatternsFiltering:    &PatternsFilteringConfig{},
 			SuspiciousBehavior:   &SuspiciousBehaviorConfig{},
 			GeolocationFiltering: &GeolocationFilteringConfig{},
+			IPBlockListConfig:    &IPBlockListConfig{},
 		},
 		TLS: &TLSConfig{
 			ACME: &ACMEconfig{},
@@ -332,6 +343,7 @@ func SetConfig(config *ProxyConfig, firewall bool, tls bool) {
 			PatternsFiltering:    &PatternsFilteringConfig{},
 			SuspiciousBehavior:   &SuspiciousBehaviorConfig{},
 			GeolocationFiltering: &GeolocationFilteringConfig{},
+			IPBlockListConfig:    &IPBlockListConfig{},
 		}
 	}
 	if tls {

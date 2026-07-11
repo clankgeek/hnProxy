@@ -254,3 +254,271 @@ func BenchmarkReverseProxyHandler_ServeHTTP(b *testing.B) {
 		handler.ServeHTTP(rr, req)
 	}
 }
+
+func TestRedirection(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     string
+		path     string
+		query    string
+		expected string
+	}{
+		{
+			name:     "Simple redirect",
+			host:     "example.com",
+			path:     "/",
+			query:    "",
+			expected: "https://example.com/",
+		},
+		{
+			name:     "With path",
+			host:     "example.com",
+			path:     "/api/users",
+			query:    "",
+			expected: "https://example.com/api/users",
+		},
+		{
+			name:     "With query string",
+			host:     "example.com",
+			path:     "/search",
+			query:    "q=test&page=2",
+			expected: "https://example.com/search?q=test&page=2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "http://"+tt.host+tt.path, nil)
+			if tt.query != "" {
+				req.URL.RawQuery = tt.query
+			}
+			rr := httptest.NewRecorder()
+
+			Redirection(tt.host, rr, req)
+
+			if rr.Code != http.StatusMovedPermanently {
+				t.Errorf("status = %d, want %d", rr.Code, http.StatusMovedPermanently)
+			}
+			location := rr.Header().Get("Location")
+			if location != tt.expected {
+				t.Errorf("Location = %q, want %q", location, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetHostname(t *testing.T) {
+	config := &clconfig.ProxyConfig{
+		Redirection: map[string]string{
+			"example.com": "www.example.com",
+		},
+		Routes: map[string]*clbackend.BackendTarget{},
+	}
+
+	tests := []struct {
+		name     string
+		host     string
+		wantHost string
+		wantPort string
+	}{
+		{
+			name:     "Simple hostname no port",
+			host:     "example.com",
+			wantHost: "www.example.com",
+			wantPort: "",
+		},
+		{
+			name:     "Hostname with port, redirected",
+			host:     "example.com:8080",
+			wantHost: "www.example.com",
+			wantPort: "8080",
+		},
+		{
+			name:     "Non-redirected hostname",
+			host:     "other.com",
+			wantHost: "other.com",
+			wantPort: "",
+		},
+		{
+			name:     "Non-redirected hostname with port",
+			host:     "other.com:9090",
+			wantHost: "other.com",
+			wantPort: "9090",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = tt.host
+
+			gotHost, gotPort := GetHostname(req, config)
+			if gotHost != tt.wantHost {
+				t.Errorf("GetHostname() host = %q, want %q", gotHost, tt.wantHost)
+			}
+			if gotPort != tt.wantPort {
+				t.Errorf("GetHostname() port = %q, want %q", gotPort, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestServeHTTP_FirewallBlocking(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}))
+	defer backend.Close()
+
+	firewallConfig := &clconfig.FirewallConfig{
+		Enabled:      true,
+		BlockMessage: "forbidden",
+		RateLimiter:  &clconfig.RateLimiterConfig{Enabled: false, Limit: 100},
+		Antibot: &clconfig.AntiBotsConfig{
+			Enabled:           true,
+			BlockLegitimeBots: false,
+		},
+		PatternsFiltering:  &clconfig.PatternsFilteringConfig{Enabled: false},
+		SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{Enabled: false},
+	}
+
+	config := &clconfig.ProxyConfig{
+		ListenAddr: "0.0.0.0:8080",
+		Firewall:   firewallConfig,
+		Routes: map[string]*clbackend.BackendTarget{
+			"app.local": clbackend.NewBackendTarget([]*url.URL{
+				clbackend.MustParseURL(backend.URL),
+			}),
+		},
+	}
+	clconfig.SetConfig(config, false, false)
+
+	firewall := clfirewall.NewFirewall(firewallConfig)
+	handler := NewReverseProxyHandler(config, firewall)
+
+	tests := []struct {
+		name       string
+		userAgent  string
+		clientIP   string
+		wantStatus int
+	}{
+		{
+			name:       "Empty User-Agent (bot) -> 403",
+			userAgent:  "",
+			clientIP:   "1.2.3.4:5678",
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "Normal User-Agent -> 200",
+			userAgent:  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+			clientIP:   "1.2.3.5:5678",
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = "app.local"
+			req.Header.Set("User-Agent", tt.userAgent)
+			req.RemoteAddr = tt.clientIP
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestServeHTTP_BlockMessageModes(t *testing.T) {
+	blockMessages := []struct {
+		mode       string
+		wantStatus int
+	}{
+		{"notfound", http.StatusNotFound},
+		{"teapot", http.StatusTeapot},
+		{"slowfake", http.StatusOK},
+		{"forbidden", http.StatusForbidden},
+	}
+
+	for _, bm := range blockMessages {
+		t.Run("blockmode_"+bm.mode, func(t *testing.T) {
+			firewallConfig := &clconfig.FirewallConfig{
+				Enabled:      true,
+				BlockMessage: bm.mode,
+				RateLimiter:  &clconfig.RateLimiterConfig{Enabled: false, Limit: 100},
+				Antibot: &clconfig.AntiBotsConfig{
+					Enabled:           true,
+					BlockLegitimeBots: false,
+				},
+				PatternsFiltering:  &clconfig.PatternsFilteringConfig{Enabled: false},
+				SuspiciousBehavior: &clconfig.SuspiciousBehaviorConfig{Enabled: false},
+			}
+
+			config := &clconfig.ProxyConfig{
+				ListenAddr: "0.0.0.0:8080",
+				Firewall:   firewallConfig,
+				Routes: map[string]*clbackend.BackendTarget{
+					"app.local": clbackend.NewBackendTarget([]*url.URL{
+						clbackend.MustParseURL("http://127.0.0.1:19999"),
+					}),
+				},
+			}
+			clconfig.SetConfig(config, false, false)
+
+			firewall := clfirewall.NewFirewall(firewallConfig)
+			// Pre-block the IP
+			firewall.IsBot(httptest.NewRequest("GET", "/", nil), "10.0.0.1")
+
+			handler := NewReverseProxyHandler(config, firewall)
+
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = "app.local"
+			req.Header.Set("User-Agent", "") // empty UA triggers bot detection
+			req.RemoteAddr = "10.0.0.1:1234"
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != bm.wantStatus {
+				t.Errorf("mode=%s: status = %d, want %d", bm.mode, rr.Code, bm.wantStatus)
+			}
+		})
+	}
+}
+
+func TestServeHTTP_Redirection(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	config := &clconfig.ProxyConfig{
+		ListenAddr: "0.0.0.0:8080",
+		Redirection: map[string]string{
+			"old.local": "new.local",
+		},
+		Routes: map[string]*clbackend.BackendTarget{
+			"new.local": clbackend.NewBackendTarget([]*url.URL{
+				clbackend.MustParseURL(backend.URL),
+			}),
+		},
+	}
+	clconfig.SetConfig(config, true, true)
+
+	handler := NewReverseProxyHandler(config, nil)
+
+	req := httptest.NewRequest("GET", "/page?q=1", nil)
+	req.Host = "old.local"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusMovedPermanently {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusMovedPermanently)
+	}
+	location := rr.Header().Get("Location")
+	if !strings.Contains(location, "new.local") {
+		t.Errorf("Location = %q, should contain 'new.local'", location)
+	}
+}

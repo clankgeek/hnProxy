@@ -113,10 +113,10 @@ lint:
 # Run with custom config
 run: build
 	@echo "🏃 Running $(BINARY_NAME)..."
-	@if [ -f "proxy-config.yaml" ]; then \
-		./$(BUILD_DIR)/$(BINARY_NAME) -config proxy-config.yaml; \
+	@if [ -f "hnproxy.yaml" ]; then \
+		./$(BUILD_DIR)/$(BINARY_NAME) -config hnproxy.yaml; \
 	else \
-		echo "❌ Configuration file 'proxy-config.yaml' not found"; \
+		echo "❌ Configuration file 'hnproxy.yaml' not found"; \
 		echo "💡 Run 'make example' to create one"; \
 		exit 1; \
 	fi
@@ -125,7 +125,7 @@ run: build
 example: build
 	@echo "📝 Creating example configuration..."
 	./$(BUILD_DIR)/$(BINARY_NAME) -example
-	@echo "✅ Example configuration created: proxy-config.yaml"
+	@echo "✅ Example configuration created: hnproxy.yaml"
 	@echo "💡 Edit the file before running 'make run'"
 
 # Cross-compile for multiple platforms
@@ -301,7 +301,7 @@ setup: init deps example
 	@echo "🎉 Setup complete!"
 	@echo ""
 	@echo "Next steps:"
-	@echo "1. Edit proxy-config.yaml with your domains and backends"
+	@echo "1. Edit hnproxy.yaml with your domains and backends"
 	@echo "2. Run 'make run' to start the proxy"
 	@echo "3. Or run 'make install' to install system-wide"
 
@@ -341,7 +341,7 @@ help:
 	@echo "  make deb-clean      - Clean Debian build artifacts"
 	@echo ""
 	@echo "🏃 Run Commands:"
-	@echo "  make run            - Build and run with proxy-config.yaml"
+	@echo "  make run            - Build and run with hnproxy.yaml"
 	@echo ""
 	@echo "🔍 Utilities:"
 	@echo "  make test           - Run unit tests with coverage"

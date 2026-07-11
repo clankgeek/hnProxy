@@ -2,6 +2,10 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.3.0] - 2026-07-11
+
+- Filtrage via une base ip reputation.
+
 ## [1.2.0] - 2025-12-18
 - choix du blockmessage, avec 403, 404, 418 ou slowfake
 - filtrage des patterns wordpress si on ne l'utilise pas

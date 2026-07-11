@@ -1,11 +1,14 @@
 package clfirewall
 
 import (
+	"bufio"
 	"fmt"
 	"hnproxy/internal/clconfig"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +43,8 @@ type Firewall struct {
 	GeoDB *geoip2.Reader
 
 	Redis *redis.Client
+
+	IPBlockList map[string]struct{}
 }
 
 // RateLimiter pour limiter le nombre de requêtes par IP
@@ -95,8 +100,9 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 			limit:    100,         // 100 requêtes
 			window:   time.Minute, // par minute
 		},
-		GeoDB: geodb,
-		Redis: redisClient,
+		GeoDB:       geodb,
+		Redis:       redisClient,
+		IPBlockList: make(map[string]struct{}),
 	}
 
 	for _, ua := range botUserAgents {
@@ -111,9 +117,120 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 		fw.iaBots[iaBot] = true
 	}
 
+	if fw.Config.IPBlockListConfig != nil && fw.Config.IPBlockListConfig.Enabled {
+		path := fw.Config.IPBlockListConfig.DatabasePath
+		url := fw.Config.IPBlockListConfig.DatabaseURL
+		if path == "" && url != "" {
+			if url != "" {
+				path = fw.DownloadFile(url)
+				if path == "" {
+					log.Warn().Msg("Échec du téléchargement de la blocklist IP, le module IPBlockList sera désactivé")
+					return fw
+				}
+				defer os.Remove(path) // Nettoyer le fichier temporaire après utilisation
+				log.Info().Msg(fmt.Sprintf("✅ Blocklist IP téléchargée et prête à être chargée depuis '%s'", path))
+				fw.LoadBlocklist(path)
+				go fw.startBlocklistAutoRefresh(url)
+				return fw
+			} else {
+				log.Warn().Msg("Aucun chemin ou URL fourni pour la blocklist IP, le module IPBlockList sera désactivé")
+				return fw
+			}
+		} else {
+			log.Info().Msg(fmt.Sprintf("✅ Blocklist IP chargée depuis le chemin local '%s'", path))
+		}
+		fw.LoadBlocklist(path)
+	}
+
 	return fw
 }
-func (bd *Firewall) IsLimiter(r *http.Request, clientIP string) bool {
+
+func (bd *Firewall) DownloadFile(url string) (path string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors du téléchargement de la blocklist IP")
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Error().Int("status", resp.StatusCode).Msg("Réponse HTTP invalide lors du téléchargement de la blocklist IP")
+		return ""
+	}
+
+	tmpFile, err := os.CreateTemp("", "ipblocklist-*.txt")
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors de la création du fichier temporaire pour la blocklist IP")
+		return ""
+	}
+	defer tmpFile.Close()
+
+	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
+		log.Error().Err(err).Msg("Erreur lors de l'écriture de la blocklist IP")
+		return ""
+	}
+
+	path = tmpFile.Name()
+	return path
+}
+
+func (bd *Firewall) LoadBlocklist(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors du chargement de la blocklist IP")
+		return
+	}
+	defer file.Close()
+
+	bd.mu.Lock()
+	defer bd.mu.Unlock()
+
+	bd.IPBlockList = make(map[string]struct{})
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		ip := strings.TrimSpace(scanner.Text())
+		if ip != "" && !strings.HasPrefix(ip, "#") {
+			bd.IPBlockList[ip] = struct{}{}
+		}
+	}
+	if scanner.Err() != nil {
+		log.Error().Err(scanner.Err()).Msg("Erreur lors de la lecture de la blocklist IP")
+	} else {
+		log.Info().Msg(fmt.Sprintf("✅ Blocklist IP chargée avec succès depuis '%s' (%d IPs)", path, len(bd.IPBlockList)))
+	}
+}
+
+// startBlocklistAutoRefresh télécharge et recharge la blocklist IP toutes les 24h.
+func (bd *Firewall) startBlocklistAutoRefresh(url string) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		log.Info().Msg("🔄 Mise à jour automatique de la blocklist IP (24h)")
+		path := bd.DownloadFile(url)
+		if path == "" {
+			log.Warn().Msg("Échec du téléchargement de la blocklist IP lors de la mise à jour automatique")
+			continue
+		}
+		bd.LoadBlocklist(path)
+		os.Remove(path)
+	}
+}
+
+func (bd *Firewall) IsIPInBlocklist(clientIP string) bool {
+	if bd.Config.IPBlockListConfig == nil || !bd.Config.IPBlockListConfig.Enabled {
+		return false
+	}
+	bd.mu.RLock()
+	defer bd.mu.RUnlock()
+	if _, blocked := bd.IPBlockList[clientIP]; blocked {
+		log.Warn().Msg(fmt.Sprintf("🛡️ Requête bloquée par le module IPBlockList pour l'IP '%s'", clientIP))
+		return true
+	}
+	return false
+}
+
+func (bd *Firewall) IsLimiter(clientIP string) bool {
 	if bd.Config.RateLimiter.Enabled && !bd.rateLimiter.Allow(clientIP) {
 		log.Warn().Msg(fmt.Sprintf("🛡️ Rate limit dépassé pour %s", clientIP))
 		bd.blockIP(clientIP, 15*time.Minute)

@@ -136,6 +136,9 @@ firewall:
       addr: 127.0.0.1:6379 # vide pour un memcache interne
       db: 0
     blockmessage: forbidden
+    ipblocklist:
+        enabled: true
+        DatabaseURL: https://raw.githubusercontent.com/duggytuxy/Data-Shield_IPv4_Blocklist/refs/heads/main/prod_data-shield_ipv4_blocklist.txt
     ratelimiter:
         enabled: true
         limit: 100
@@ -167,6 +170,8 @@ firewall:
 
 - Rate limiter en requêtes par minute
 - Antibot avec possibilité de laisser passer les good bots, et bloquer les bots IA (ChatGPT, Bard, etc)
+- geolocation filtering avec possibilité de bloquer certains pays et autoriser d'autres
+- ipblocklist liste d'ip malveillantes à bloquer, via une base ip reputation (ex:https://github.com/duggytuxy/Data-Shield_IPv4_Blocklist), mise à jour automatique toutes les 24h ou au démarrage.
 
 ### ACME/Let's Encrypt (Recommandé)
 

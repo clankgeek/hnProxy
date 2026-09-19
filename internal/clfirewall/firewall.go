@@ -328,7 +328,7 @@ func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 	}
 
 	if bd.Config.SuspiciousBehavior.WordpressRemover {
-		suspiciousPaths = append(suspiciousPaths, "/wp-login.php", "/wp-admin/", "/xmlrpc.php")
+		suspiciousPaths = append(suspiciousPaths, "/wp-login.php", "/wp-admin/", "/wp-json/", "/xmlrpc.php")
 	}
 
 	path := strings.ToLower(r.URL.Path)

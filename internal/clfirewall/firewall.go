@@ -458,32 +458,11 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
+// GetClientIP retourne l'IP de la connexion TCP.
+// hnProxy est exposé directement : les headers CF-Connecting-IP, True-Client-IP,
+// X-Real-IP et X-Forwarded-For sont fournis par le client et ne doivent jamais
+// servir au firewall (contournement de la blocklist, du rate limiter, de l'antibot).
 func (bd *Firewall) GetClientIP(r *http.Request) string {
-	// 1. Cloudflare (priorité haute car très fiable)
-	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
-		return ip
-	}
-
-	// 2. Header True-Client-IP (utilisé par Cloudflare Enterprise, Akamai)
-	if ip := r.Header.Get("True-Client-IP"); ip != "" {
-		return ip
-	}
-
-	// 3. X-Real-IP (Nginx, certains load balancers)
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
-
-	// 4. X-Forwarded-For (standard de facto)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Première IP = client original
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-
-	// 5. Fallback sur RemoteAddr
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr // Pas de port, retourner tel quel

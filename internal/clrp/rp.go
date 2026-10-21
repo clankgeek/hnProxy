@@ -275,12 +275,16 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			// Conserver les headers de cache
 			// If-Modified-Since, If-None-Match, etc. sont déjà copiés par défaut
 
-			if req.Header.Get("X-Forwarded-Proto") == "" {
-				if req.TLS != nil {
-					req.Header.Set("X-Forwarded-Proto", "https")
-				} else {
-					req.Header.Set("X-Forwarded-Proto", "http")
-				}
+			// Le proxy est exposé directement : les headers d'identité du client
+			// ne sont pas fiables, les backends reçoivent uniquement les valeurs du proxy
+			req.Header.Del("CF-Connecting-IP")
+			req.Header.Del("True-Client-IP")
+			req.Header.Set("X-Real-IP", rph.Firewall.GetClientIP(r))
+
+			if req.TLS != nil {
+				req.Header.Set("X-Forwarded-Proto", "https")
+			} else {
+				req.Header.Set("X-Forwarded-Proto", "http")
 			}
 			req.Header.Set("X-Forwarded-Host", r.Host)
 			req.Header.Set("X-Forwarded-For", r.RemoteAddr)

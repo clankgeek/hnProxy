@@ -360,28 +360,20 @@ func TestGetClientIP(t *testing.T) {
 		expectedIP string
 	}{
 		{
-			"X-Real-IP",
+			"X-Real-IP ignoré",
 			func(r *http.Request) {
 				r.Header.Set("X-Real-IP", "203.0.113.1")
 				r.RemoteAddr = "192.168.1.1:12345"
 			},
-			"203.0.113.1",
+			"192.168.1.1",
 		},
 		{
-			"X-Forwarded-For simple",
+			"X-Forwarded-For ignoré",
 			func(r *http.Request) {
-				r.Header.Set("X-Forwarded-For", "203.0.113.2")
+				r.Header.Set("X-Forwarded-For", "203.0.113.2, 10.0.0.1")
 				r.RemoteAddr = "192.168.1.1:12345"
 			},
-			"203.0.113.2",
-		},
-		{
-			"X-Forwarded-For multiple",
-			func(r *http.Request) {
-				r.Header.Set("X-Forwarded-For", "203.0.113.3, 10.0.0.1, 192.168.1.1")
-				r.RemoteAddr = "192.168.1.1:12345"
-			},
-			"203.0.113.3",
+			"192.168.1.1",
 		},
 		{
 			"RemoteAddr avec port",
@@ -692,7 +684,7 @@ func TestHasSuspiciousBehavior_WordPress(t *testing.T) {
 	}
 }
 
-// TestGetClientIP_CloudflareHeaders tests Cloudflare and True-Client-IP headers
+// TestGetClientIP_CloudflareHeaders vérifie que les headers Cloudflare / True-Client-IP, falsifiables, sont ignorés
 func TestGetClientIP_CloudflareHeaders(t *testing.T) {
 	fw := NewFirewall(NewFirewallConfig(false, 100, false, false, false, false))
 
@@ -702,8 +694,8 @@ func TestGetClientIP_CloudflareHeaders(t *testing.T) {
 		value    string
 		expected string
 	}{
-		{"CF-Connecting-IP", "CF-Connecting-IP", "203.0.113.1", "203.0.113.1"},
-		{"True-Client-IP", "True-Client-IP", "203.0.113.2", "203.0.113.2"},
+		{"CF-Connecting-IP", "CF-Connecting-IP", "203.0.113.1", "192.168.1.1"},
+		{"True-Client-IP", "True-Client-IP", "203.0.113.2", "192.168.1.1"},
 	}
 
 	for _, tt := range tests {

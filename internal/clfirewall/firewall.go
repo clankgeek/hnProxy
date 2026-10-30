@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +19,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const maxBlocklistSize = 50 * 1024 * 1024 // 50 Mo maximum pour la blocklist
+
 // Firewall gère la détection et le blocage des bots
 type Firewall struct {
 	Config *clconfig.FirewallConfig
 
 	// Liste des User-Agents de bots connus
-	botUserAgents map[string]bool
+	botUserAgents []string
 
 	// Liste des IP bloquées
 	blockedIPs map[string]time.Time
@@ -33,10 +36,10 @@ type Firewall struct {
 	suspiciousPatterns []string
 
 	// Liste des bots légitimes
-	legitimateBots map[string]bool
+	legitimateBots []string
 
 	// Liste des bots IA
-	iaBots map[string]bool
+	iaBots []string
 
 	rateLimiter *RateLimiter
 
@@ -45,6 +48,9 @@ type Firewall struct {
 	Redis *redis.Client
 
 	IPBlockList map[string]struct{}
+
+	stopChan  chan struct{}
+	closeOnce sync.Once
 }
 
 // RateLimiter pour limiter le nombre de requêtes par IP
@@ -75,11 +81,16 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 		})
 	}
 
+	rateLimit := 100
+	if config.RateLimiter != nil && config.RateLimiter.Limit > 0 {
+		rateLimit = config.RateLimiter.Limit
+	}
+
 	fw := &Firewall{
 		Config:         config,
-		legitimateBots: make(map[string]bool),
-		iaBots:         make(map[string]bool),
-		botUserAgents:  make(map[string]bool),
+		legitimateBots: make([]string, 0, len(legitimateBots)),
+		iaBots:         make([]string, 0, len(iaBots)),
+		botUserAgents:  make([]string, 0, len(botUserAgents)),
 		suspiciousPatterns: []string{
 			"bot",
 			"crawler",
@@ -97,24 +108,25 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 		blockedIPs: make(map[string]time.Time),
 		rateLimiter: &RateLimiter{
 			requests: make(map[string][]time.Time),
-			limit:    100,         // 100 requêtes
+			limit:    rateLimit,
 			window:   time.Minute, // par minute
 		},
 		GeoDB:       geodb,
 		Redis:       redisClient,
 		IPBlockList: make(map[string]struct{}),
+		stopChan:    make(chan struct{}),
 	}
 
 	for _, ua := range botUserAgents {
-		fw.botUserAgents[ua] = true
+		fw.botUserAgents = append(fw.botUserAgents, strings.ToLower(ua))
 	}
 
 	for _, bot := range legitimateBots {
-		fw.legitimateBots[bot] = true
+		fw.legitimateBots = append(fw.legitimateBots, strings.ToLower(bot))
 	}
 
 	for _, iaBot := range iaBots {
-		fw.iaBots[iaBot] = true
+		fw.iaBots = append(fw.iaBots, strings.ToLower(iaBot))
 	}
 
 	if fw.Config.IPBlockListConfig != nil && fw.Config.IPBlockListConfig.Enabled {
@@ -146,7 +158,10 @@ func NewFirewall(config *clconfig.FirewallConfig) *Firewall {
 }
 
 func (bd *Firewall) DownloadFile(url string) (path string) {
-	resp, err := http.Get(url)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		log.Error().Err(err).Msg("Erreur lors du téléchargement de la blocklist IP")
 		return ""
@@ -165,8 +180,10 @@ func (bd *Firewall) DownloadFile(url string) (path string) {
 	}
 	defer tmpFile.Close()
 
-	if _, err = io.Copy(tmpFile, resp.Body); err != nil {
+	limitedBody := io.LimitReader(resp.Body, maxBlocklistSize)
+	if _, err = io.Copy(tmpFile, limitedBody); err != nil {
 		log.Error().Err(err).Msg("Erreur lors de l'écriture de la blocklist IP")
+		os.Remove(tmpFile.Name())
 		return ""
 	}
 
@@ -205,15 +222,20 @@ func (bd *Firewall) LoadBlocklist(path string) {
 func (bd *Firewall) startBlocklistAutoRefresh(url string) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
-		log.Info().Msg("🔄 Mise à jour automatique de la blocklist IP (24h)")
-		path := bd.DownloadFile(url)
-		if path == "" {
-			log.Warn().Msg("Échec du téléchargement de la blocklist IP lors de la mise à jour automatique")
-			continue
+	for {
+		select {
+		case <-bd.stopChan:
+			return
+		case <-ticker.C:
+			log.Info().Msg("🔄 Mise à jour automatique de la blocklist IP (24h)")
+			p := bd.DownloadFile(url)
+			if p == "" {
+				log.Warn().Msg("Échec du téléchargement de la blocklist IP lors de la mise à jour automatique")
+				continue
+			}
+			bd.LoadBlocklist(p)
+			os.Remove(p)
 		}
-		bd.LoadBlocklist(path)
-		os.Remove(path)
 	}
 }
 
@@ -244,10 +266,10 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	userAgent := strings.ToLower(r.Header.Get("User-Agent"))
 	log.Debug().Msg(fmt.Sprintf("🤖 User Agent est : %s", userAgent))
 
-	if bd.Config.Antibot.Enabled {
+	if bd.Config.Antibot != nil && bd.Config.Antibot.Enabled {
 		// Vérifier les bots légitimes SI on veut les bloquer
 		if bd.Config.Antibot.BlockLegitimeBots {
-			for bot := range bd.legitimateBots {
+			for _, bot := range bd.legitimateBots {
 				if strings.Contains(userAgent, bot) {
 					log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot légitime bloqué: %s depuis %s", bot, clientIP))
 					// Blocage plus court pour les bots légitimes (ils reviendront)
@@ -258,7 +280,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 		}
 
 		if bd.Config.Antibot.BlockIABots {
-			for iaBot := range bd.iaBots {
+			for _, iaBot := range bd.iaBots {
 				if strings.Contains(userAgent, iaBot) {
 					log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot IA bloqué: %s depuis %s", iaBot, clientIP))
 					// Blocage plus long pour les bots IA (moins légitimes)
@@ -276,8 +298,11 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 		}
 
 		// Vérifier les User-Agents de bots connus (malveillants)
-		for botUA := range bd.botUserAgents {
+		for _, botUA := range bd.botUserAgents {
 			if strings.Contains(userAgent, botUA) {
+				if !bd.Config.Antibot.BlockLegitimeBots && bd.isLegitimateBot(userAgent) {
+					continue
+				}
 				log.Warn().Msg(fmt.Sprintf("🛡️🤖 Bot malveillant détecté: %s depuis %s", botUA, clientIP))
 				bd.blockIP(clientIP, 24*time.Hour)
 				return true
@@ -286,11 +311,11 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	}
 
 	// Vérifier les patterns suspects
-	if bd.Config.PatternsFiltering.Enabled {
+	if bd.Config.PatternsFiltering != nil && bd.Config.PatternsFiltering.Enabled {
 		for _, pattern := range bd.suspiciousPatterns {
 			if strings.Contains(userAgent, pattern) {
 				// Si on ne bloque PAS les bots légitimes, vérifier si c'en est un
-				if !bd.Config.Antibot.BlockLegitimeBots && bd.isLegitimateBot(userAgent) {
+				if (bd.Config.Antibot == nil || !bd.Config.Antibot.BlockLegitimeBots) && bd.isLegitimateBot(userAgent) {
 					// C'est un bot légitime et on ne les bloque pas
 					log.Debug().Msg(fmt.Sprintf("Bot légitime autorisé: %s depuis %s", userAgent, clientIP))
 					continue
@@ -304,7 +329,7 @@ func (bd *Firewall) IsBot(r *http.Request, clientIP string) bool {
 	}
 
 	// Vérifications additionnelles
-	if bd.Config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
+	if bd.Config.SuspiciousBehavior != nil && bd.Config.SuspiciousBehavior.Enabled && bd.hasSuspiciousBehavior(r) {
 		log.Warn().Msg(fmt.Sprintf("🛡️🤖 Comportement suspect détecté depuis %s", clientIP))
 		bd.blockIP(clientIP, 30*time.Minute)
 		return true
@@ -327,13 +352,16 @@ func (bd *Firewall) hasSuspiciousBehavior(r *http.Request) bool {
 		"/autoload_classmap", // backdoors
 	}
 
-	if bd.Config.SuspiciousBehavior.WordpressRemover {
+	if bd.Config.SuspiciousBehavior != nil && bd.Config.SuspiciousBehavior.WordpressRemover {
 		suspiciousPaths = append(suspiciousPaths, "/wp-login.php", "/wp-admin/", "/wp-json/", "/xmlrpc.php")
 	}
 
-	path := strings.ToLower(r.URL.Path)
+	rawPath := strings.ToLower(r.URL.Path)
+	cleanedPath := strings.ToLower(path.Clean(r.URL.Path))
+	rawQuery := strings.ToLower(r.URL.RawQuery)
+
 	for _, suspicious := range suspiciousPaths {
-		if strings.Contains(path, suspicious) {
+		if strings.Contains(rawPath, suspicious) || strings.Contains(cleanedPath, suspicious) || (rawQuery != "" && strings.Contains(rawQuery, suspicious)) {
 			return true
 		}
 	}
@@ -399,7 +427,7 @@ func (bd *Firewall) IsGeolocationBlock(r *http.Request, clientIP string) bool {
 
 // isLegitimateBot vérifie si c'est un bot légitime (méthode interne)
 func (bd *Firewall) isLegitimateBot(userAgent string) bool {
-	for bot := range bd.legitimateBots {
+	for _, bot := range bd.legitimateBots {
 		if strings.Contains(userAgent, bot) {
 			return true
 		}
@@ -415,7 +443,7 @@ func (bd *Firewall) blockIP(ip string, duration time.Duration) {
 	log.Warn().Msg(fmt.Sprintf("🛡️ Ip '%s' bannie durant '%s'", ip, duration))
 }
 
-// isIPBlocked vérifie si une IP est bloquée
+// IsIPBlocked vérifie si une IP est bloquée
 func (bd *Firewall) IsIPBlocked(ip string) bool {
 	bd.mu.RLock()
 	defer bd.mu.RUnlock()
@@ -424,8 +452,8 @@ func (bd *Firewall) IsIPBlocked(ip string) bool {
 		if time.Now().Before(blockUntil) {
 			return true
 		}
-		// Nettoyer l'entrée expirée
-		delete(bd.blockedIPs, ip)
+		// La suppression effective est déléguée à CleanupRoutine sous Lock()
+		// pour éviter un concurrent map write sous RLock().
 	}
 	return false
 }
@@ -458,11 +486,11 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
-// GetClientIP retourne l'IP de la connexion TCP.
+// ExtractClientIP retourne l'IP de la connexion TCP.
 // hnProxy est exposé directement : les headers CF-Connecting-IP, True-Client-IP,
 // X-Real-IP et X-Forwarded-For sont fournis par le client et ne doivent jamais
 // servir au firewall (contournement de la blocklist, du rate limiter, de l'antibot).
-func (bd *Firewall) GetClientIP(r *http.Request) string {
+func ExtractClientIP(r *http.Request) string {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr // Pas de port, retourner tel quel
@@ -470,36 +498,65 @@ func (bd *Firewall) GetClientIP(r *http.Request) string {
 	return ip
 }
 
+// GetClientIP retourne l'IP de la connexion TCP.
+func (bd *Firewall) GetClientIP(r *http.Request) string {
+	return ExtractClientIP(r)
+}
+
+// Close arrête les goroutines de nettoyage/rafraîchissement et ferme les connexions (GeoDB, Redis).
+func (bd *Firewall) Close() {
+	if bd == nil {
+		return
+	}
+	bd.closeOnce.Do(func() {
+		if bd.stopChan != nil {
+			close(bd.stopChan)
+		}
+		if bd.GeoDB != nil {
+			_ = bd.GeoDB.Close()
+		}
+		if bd.Redis != nil {
+			_ = bd.Redis.Close()
+		}
+	})
+}
+
 // CleanupRoutine nettoie périodiquement les IPs bloquées expirées
 func (bd *Firewall) CleanupRoutine() {
 	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
-		for range ticker.C {
-			bd.mu.Lock()
-			now := time.Now()
-			for ip, blockUntil := range bd.blockedIPs {
-				if now.After(blockUntil) {
-					delete(bd.blockedIPs, ip)
-				}
-			}
-			bd.mu.Unlock()
-
-			// Nettoyer aussi le rate limiter
-			bd.rateLimiter.mu.Lock()
-			for ip, requests := range bd.rateLimiter.requests {
-				var validRequests []time.Time
-				for _, reqTime := range requests {
-					if now.Sub(reqTime) <= bd.rateLimiter.window {
-						validRequests = append(validRequests, reqTime)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-bd.stopChan:
+				return
+			case <-ticker.C:
+				bd.mu.Lock()
+				now := time.Now()
+				for ip, blockUntil := range bd.blockedIPs {
+					if now.After(blockUntil) {
+						delete(bd.blockedIPs, ip)
 					}
 				}
-				if len(validRequests) == 0 {
-					delete(bd.rateLimiter.requests, ip)
-				} else {
-					bd.rateLimiter.requests[ip] = validRequests
+				bd.mu.Unlock()
+
+				// Nettoyer aussi le rate limiter
+				bd.rateLimiter.mu.Lock()
+				for ip, requests := range bd.rateLimiter.requests {
+					var validRequests []time.Time
+					for _, reqTime := range requests {
+						if now.Sub(reqTime) <= bd.rateLimiter.window {
+							validRequests = append(validRequests, reqTime)
+						}
+					}
+					if len(validRequests) == 0 {
+						delete(bd.rateLimiter.requests, ip)
+					} else {
+						bd.rateLimiter.requests[ip] = validRequests
+					}
 				}
+				bd.rateLimiter.mu.Unlock()
 			}
-			bd.rateLimiter.mu.Unlock()
 		}
 	}()
 }

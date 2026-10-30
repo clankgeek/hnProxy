@@ -2,6 +2,17 @@
 
 Toutes les modifications notables de ce projet seront documentées dans ce fichier.
 
+## [1.3.1] - 2026-10-31
+
+- Fix: correction d'un crash concurrent (`RLock`) lors de la vérification des IPs bannies
+- Fix: prise en compte de la limite configurée pour le rate limiter
+- Fix: transmission de l'IP cliente au backend (`X-Real-IP`, `X-Forwarded-For`) et suppression des headers falsifiables
+- Fix: partage d'une instance unique `autocert.Manager` entre HTTP et HTTPS
+- Perf: mutualisation du `http.Transport` (réutilisation des connexions Keep-Alive vers les backends)
+- Sécurité: ajout de timeouts HTTP/HTTPS anti-Slowloris et limitation de concurrence sur le mode `slowfake`
+- Sécurité: exécution du firewall avant les redirections et sécurisation du téléchargement des blocklists IP
+- Ajout: arrêt gracieux du serveur (`SIGINT`/`SIGTERM`) et fermeture propre des ressources
+
 ## [1.3.0] - 2026-07-11
 
 - Filtrage via une base ip reputation.

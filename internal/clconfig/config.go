@@ -264,8 +264,8 @@ func ValidateConfig(config *ProxyConfig) error {
 	}
 
 	// Validate TLS config if enabled
-	if config.TLS.Enabled {
-		if config.TLS.ACME.Enabled {
+	if config.TLS != nil && config.TLS.Enabled {
+		if config.TLS.ACME != nil && config.TLS.ACME.Enabled {
 			if config.TLS.ACME.Email == "" {
 				return fmt.Errorf("email ACME requis")
 			}

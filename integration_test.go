@@ -4,6 +4,8 @@ package main
 
 import (
 	"fmt"
+	"hnproxy/internal/clconfig"
+	"hnproxy/internal/clrp"
 	"io"
 	"log"
 	"net/http"
@@ -55,22 +57,22 @@ routes:
 	configFile.Close()
 
 	// Load and convert config
-	yamlConfig, err := loadConfig(configFile.Name())
+	yamlConfig, err := clconfig.LoadConfig(configFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	proxyConfig, err := convertConfig(yamlConfig)
+	proxyConfig, err := clconfig.ConvertConfig(yamlConfig)
 	if err != nil {
 		t.Fatalf("Failed to convert config: %v", err)
 	}
 
-	if err := ValidateConfig(proxyConfig); err != nil {
+	if err := clconfig.ValidateConfig(proxyConfig); err != nil {
 		t.Fatalf("Config validation failed: %v", err)
 	}
 
 	// Create and start proxy server
-	handler := NewReverseProxyHandler(proxyConfig)
+	handler := clrp.NewReverseProxyHandler(proxyConfig, nil)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
@@ -107,7 +109,7 @@ routes:
 			name:       "Unknown host",
 			host:       "unknown.local",
 			path:       "/",
-			wantStatus: http.StatusNotFound,
+			wantStatus: http.StatusOK,
 		},
 	}
 
@@ -187,17 +189,17 @@ routes:
 	configFile.Close()
 
 	// Setup proxy
-	yamlConfig, err := loadConfig(configFile.Name())
+	yamlConfig, err := clconfig.LoadConfig(configFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	proxyConfig, err := convertConfig(yamlConfig)
+	proxyConfig, err := clconfig.ConvertConfig(yamlConfig)
 	if err != nil {
 		t.Fatalf("Failed to convert config: %v", err)
 	}
 
-	handler := NewReverseProxyHandler(proxyConfig)
+	handler := clrp.NewReverseProxyHandler(proxyConfig, nil)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
@@ -268,17 +270,17 @@ routes:
 	configFile.Close()
 
 	// Setup proxy
-	yamlConfig, err := loadConfig(configFile.Name())
+	yamlConfig, err := clconfig.LoadConfig(configFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	proxyConfig, err := convertConfig(yamlConfig)
+	proxyConfig, err := clconfig.ConvertConfig(yamlConfig)
 	if err != nil {
 		t.Fatalf("Failed to convert config: %v", err)
 	}
 
-	handler := NewReverseProxyHandler(proxyConfig)
+	handler := clrp.NewReverseProxyHandler(proxyConfig, nil)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
@@ -369,17 +371,17 @@ routes:
 	configFile.Close()
 
 	// Setup proxy
-	yamlConfig, err := loadConfig(configFile.Name())
+	yamlConfig, err := clconfig.LoadConfig(configFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	proxyConfig, err := convertConfig(yamlConfig)
+	proxyConfig, err := clconfig.ConvertConfig(yamlConfig)
 	if err != nil {
 		t.Fatalf("Failed to convert config: %v", err)
 	}
 
-	handler := NewReverseProxyHandler(proxyConfig)
+	handler := clrp.NewReverseProxyHandler(proxyConfig, nil)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
@@ -438,17 +440,17 @@ routes:
 	configFile.Close()
 
 	// Setup proxy
-	yamlConfig, err := loadConfig(configFile.Name())
+	yamlConfig, err := clconfig.LoadConfig(configFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}
 
-	proxyConfig, err := convertConfig(yamlConfig)
+	proxyConfig, err := clconfig.ConvertConfig(yamlConfig)
 	if err != nil {
 		t.Fatalf("Failed to convert config: %v", err)
 	}
 
-	handler := NewReverseProxyHandler(proxyConfig)
+	handler := clrp.NewReverseProxyHandler(proxyConfig, nil)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 

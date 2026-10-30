@@ -1,17 +1,21 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"hnproxy/internal/clconfig"
 	"hnproxy/internal/cllog"
 	"hnproxy/internal/clserver"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
-const VERSION string = "1.3.0"
+const VERSION string = "1.3.1"
 
 // parseCommandLineArgs parses and validates command line arguments
 func parseCommandLineArgs() (configFile string, shouldCreateExample bool, versionDisplay bool, err error) {
@@ -70,6 +74,20 @@ func main() {
 	// Create and configure server
 	server := clserver.NewServer(config)
 	server.DisplayConfiguration(configFile)
+
+	// Arrêt gracieux sur SIGINT / SIGTERM
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-sigCtx.Done()
+		log.Info().Msg("🛑 Signal d'arrêt reçu, fermeture gracieuse en cours...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("Erreur lors de la fermeture du serveur")
+		}
+	}()
 
 	defer server.Close()
 

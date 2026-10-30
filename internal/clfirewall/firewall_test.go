@@ -16,7 +16,7 @@ func NewFirewallConfig(withRateLimiter bool, limit int, withAntibot bool, withBl
 		Enabled: true,
 		RateLimiter: &clconfig.RateLimiterConfig{
 			Enabled: withRateLimiter,
-			Limit:   100,
+			Limit:   limit,
 		},
 		Antibot: &clconfig.AntiBotsConfig{
 			Enabled:           withAntibot,
@@ -738,7 +738,34 @@ func TestNewFirewall_WithIPBlocklistPath(t *testing.T) {
 	if fw == nil {
 		t.Fatal("NewFirewall returned nil")
 	}
+	defer fw.Close()
 	if len(fw.IPBlockList) != 2 {
 		t.Errorf("Expected 2 IPs in blocklist, got %d", len(fw.IPBlockList))
 	}
+}
+
+// TestIsIPBlocked_ConcurrentExpired vérifie l'absence de data race / crash lors de lectures concurrentes d'une IP expirée
+func TestIsIPBlocked_ConcurrentExpired(t *testing.T) {
+	fw := NewFirewall(NewFirewallConfig(true, 42, false, false, false, false))
+	defer fw.Close()
+
+	if fw.rateLimiter.limit != 42 {
+		t.Errorf("rateLimiter.limit = %d, want 42", fw.rateLimiter.limit)
+	}
+
+	ip := "192.168.1.99"
+	fw.blockIP(ip, 10*time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if fw.IsIPBlocked(ip) {
+				t.Error("Expired IP should not be reported as blocked")
+			}
+		}()
+	}
+	wg.Wait()
 }

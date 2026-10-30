@@ -17,22 +17,39 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const maxConcurrentSlowFake = 50
+
 // Reverse Proxy Handler
 type ReverseProxyHandler struct {
-	Config   *clconfig.ProxyConfig
-	Firewall *clfirewall.Firewall
+	Config      *clconfig.ProxyConfig
+	Firewall    *clfirewall.Firewall
+	transport   *http.Transport
+	slowFakeSem chan struct{}
 }
 
 func NewReverseProxyHandler(config *clconfig.ProxyConfig, firewall *clfirewall.Firewall) *ReverseProxyHandler {
 	return &ReverseProxyHandler{
 		Config:   config,
 		Firewall: firewall,
+		transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+		},
+		slowFakeSem: make(chan struct{}, maxConcurrentSlowFake),
 	}
 }
 
 func (rph *ReverseProxyHandler) FirewallRequest(r *http.Request) error {
-	if rph.Config.Firewall.Enabled && rph.Firewall != nil {
-		clientIp := rph.Firewall.GetClientIP(r)
+	if rph.Config != nil && rph.Config.Firewall != nil && rph.Config.Firewall.Enabled && rph.Firewall != nil {
+		clientIp := clfirewall.ExtractClientIP(r)
 		if rph.Firewall.IsIPBlocked(clientIp) {
 			return fmt.Errorf("")
 		}
@@ -140,7 +157,17 @@ func (rph *ReverseProxyHandler) serveTeaPot(w http.ResponseWriter) {
 	w.Write([]byte(svg))
 }
 
-func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
+func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter, r *http.Request) {
+	if rph.slowFakeSem != nil {
+		select {
+		case rph.slowFakeSem <- struct{}{}:
+			defer func() { <-rph.slowFakeSem }()
+		default:
+			http.Error(w, "Access Denied", http.StatusForbidden)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
@@ -184,7 +211,12 @@ func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-	time.Sleep(200 * time.Millisecond)
+
+	select {
+	case <-r.Context().Done():
+		return
+	case <-time.After(200 * time.Millisecond):
+	}
 
 	// Envoie les paragraphes un par un
 	numParagraphs := 10 + rand.Intn(20)
@@ -192,14 +224,20 @@ func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
 	for i := 0; i < numParagraphs; i++ {
 		paragraph := loremParagraphs[rand.Intn(len(loremParagraphs))]
 
-		w.Write([]byte(paragraph + "\n"))
+		if _, err := w.Write([]byte(paragraph + "\n")); err != nil {
+			return
+		}
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
 
 		// Délai aléatoire entre 200ms et 800ms
 		delay := 200 + rand.Intn(600)
-		time.Sleep(time.Duration(delay) * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(time.Duration(delay) * time.Millisecond):
+		}
 	}
 
 	// Envoie le footer
@@ -212,7 +250,7 @@ func (rph *ReverseProxyHandler) serveSlowFake(w http.ResponseWriter) {
 func (rph *ReverseProxyHandler) getTargetHostname(w http.ResponseWriter, r *http.Request, hostname string) *clbackend.BackendTarget {
 	target, exists := rph.Config.Routes[hostname]
 	if !exists {
-		log.Debug().Msg(fmt.Sprintf("❌ Invalid hostname: source: %s, hostname: %s", rph.Firewall.GetClientIP(r), r.Host))
+		log.Debug().Msg(fmt.Sprintf("❌ Invalid hostname: source: %s, hostname: %s", clfirewall.ExtractClientIP(r), r.Host))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(fmt.Sprintf("<!DOCTYPE html>\n<html><body>Are you lost? To help you, today is %s</body></html>", time.Now().Format(time.RFC850))))
@@ -222,6 +260,25 @@ func (rph *ReverseProxyHandler) getTargetHostname(w http.ResponseWriter, r *http
 }
 
 func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := rph.FirewallRequest(r)
+	if err != nil {
+		msg := err.Error()
+		if msg != "" {
+			log.Error().Msg(msg)
+		}
+		switch rph.Firewall.Config.BlockMessage {
+		case "notfound":
+			http.Error(w, "Page not found", http.StatusNotFound)
+		case "slowfake":
+			rph.serveSlowFake(w, r)
+		case "teapot":
+			rph.serveTeaPot(w)
+		default:
+			http.Error(w, "Access Denied", http.StatusForbidden)
+		}
+		return
+	}
+
 	hostname := strings.Split(r.Host, ":")[0]
 
 	host, port := GetHostname(r, rph.Config)
@@ -239,25 +296,6 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err := rph.FirewallRequest(r)
-	if err != nil {
-		msg := err.Error()
-		if msg != "" {
-			log.Error().Msg(msg)
-		}
-		switch rph.Firewall.Config.BlockMessage {
-		case "notfound":
-			http.Error(w, "Page not found", http.StatusNotFound)
-		case "slowfake":
-			rph.serveSlowFake(w)
-		case "teapot":
-			rph.serveTeaPot(w)
-		default:
-			http.Error(w, "Access Denied", http.StatusForbidden)
-		}
-		return
-	}
-
 	// Sélectionner le backend
 	backendURL := target.NextURL()
 	if backendURL == nil {
@@ -266,7 +304,12 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Créer le reverse proxy pour cette requête
+	transport := rph.transport
+	if transport == nil {
+		transport = http.DefaultTransport.(*http.Transport)
+	}
+
+	// Créer le reverse proxy pour cette requête (en partageant le Transport HTTP)
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = backendURL.Scheme
@@ -277,29 +320,24 @@ func (rph *ReverseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 			// Le proxy est exposé directement : les headers d'identité du client
 			// ne sont pas fiables, les backends reçoivent uniquement les valeurs du proxy
+			clientIP := clfirewall.ExtractClientIP(r)
 			req.Header.Del("CF-Connecting-IP")
 			req.Header.Del("True-Client-IP")
-			req.Header.Set("X-Real-IP", rph.Firewall.GetClientIP(r))
+			req.Header.Del("Forwarded")
+			req.Header.Del("X-Forwarded-For")
+			req.Header.Set("X-Real-IP", clientIP)
 
-			if req.TLS != nil {
+			if r.TLS != nil {
 				req.Header.Set("X-Forwarded-Proto", "https")
 			} else {
 				req.Header.Set("X-Forwarded-Proto", "http")
 			}
 			req.Header.Set("X-Forwarded-Host", r.Host)
-			req.Header.Set("X-Forwarded-For", r.RemoteAddr)
+			if _, _, err := net.SplitHostPort(r.RemoteAddr); err != nil {
+				req.Header.Set("X-Forwarded-For", clientIP)
+			}
 		},
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			ResponseHeaderTimeout: 30 * time.Second, // Important !
-		},
+		Transport: transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			// Ignorer silencieusement les annulations client (comportement normal)
 			if errors.Is(err, context.Canceled) {
